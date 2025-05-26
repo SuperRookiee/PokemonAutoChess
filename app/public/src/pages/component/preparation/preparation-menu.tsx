@@ -5,11 +5,18 @@ import { useTranslation } from "react-i18next"
 import { IGameUser } from "../../../../../models/colyseus-models/game-user"
 import PreparationState from "../../../../../rooms/states/preparation-state"
 import { Role } from "../../../../../types"
-import { BOTS_ENABLED, EloRank, EloRankThreshold, MAX_PLAYERS_PER_GAME } from "../../../../../types/Config"
+import {
+  BOTS_ENABLED,
+  EloRank,
+  EloRankThreshold,
+  MAX_PLAYERS_PER_GAME
+} from "../../../../../types/Config"
 import { BotDifficulty, GameMode } from "../../../../../types/enum/Game"
+import { SpecialGameRule } from "../../../../../types/enum/SpecialGameRule"
 import { formatMinMaxRanks } from "../../../../../utils/elo"
 import { throttle } from "../../../../../utils/function"
 import { max } from "../../../../../utils/number"
+import { pickRandomIn } from "../../../../../utils/random"
 import { setTitleNotificationIcon } from "../../../../../utils/window"
 import { useAppDispatch, useAppSelector } from "../../../hooks"
 import {
@@ -17,9 +24,9 @@ import {
   changeRoomMinMaxRanks,
   changeRoomName,
   changeRoomPassword,
-  deleteRoom,
   gameStartRequest,
-  toggleEloRoom,
+  setSpecialRule,
+  setNoElo,
   toggleReady
 } from "../../../stores/NetworkStore"
 import { cc } from "../../utils/jsx"
@@ -39,6 +46,9 @@ export default function PreparationMenu() {
     (state) => state.preparation.password
   )
   const noElo: boolean = useAppSelector((state) => state.preparation.noElo)
+  const specialGameRule: SpecialGameRule | null = useAppSelector(
+    (state) => state.preparation.specialGameRule
+  )
   const minRank = useAppSelector((state) => state.preparation.minRank)
   const maxRank = useAppSelector((state) => state.preparation.maxRank)
   const [showBotSelectModal, setShowBotSelectModal] = useState(false)
@@ -80,12 +90,6 @@ export default function PreparationMenu() {
     }
   }, [nbUsersReady, users.length, allUsersReady])
 
-  useEffect(() => {
-    if (gameMode !== GameMode.CUSTOM_LOBBY && room?.connection.isOpen) {
-      dispatch(toggleReady(true)) // automatically set users ready in non-classic game mode
-    }
-  }, [gameMode, dispatch, room?.connection.isOpen])
-
   const humans = users.filter((u) => !u.isBot)
   const isElligibleForELO =
     gameMode === GameMode.QUICKPLAY || users.filter((u) => !u.isBot).length >= 2
@@ -94,7 +98,7 @@ export default function PreparationMenu() {
   )
 
   function makePrivate() {
-    if (password === null) {
+    if (password === null || password === undefined) {
       // generate a random password made of 4 characters
       const newPassword = Math.random()
         .toString(36)
@@ -106,8 +110,8 @@ export default function PreparationMenu() {
     }
   }
 
-  function toggleElo() {
-    dispatch(toggleEloRoom(!noElo))
+  function toggleNoElo() {
+    dispatch(setNoElo(!noElo))
   }
 
   const startGame = throttle(async function startGame() {
@@ -119,36 +123,33 @@ export default function PreparationMenu() {
     }
   }, 1000)
 
-  const deleteRoomButton = (isModerator || isAdmin) && (
-    <button
-      className="bubbly red"
-      onClick={() => {
-        dispatch(deleteRoom())
-      }}
-    >
-      {t("delete_room")}
-    </button>
-  )
-
   const changeMinRank = (newMinRank: EloRank) => {
-    dispatch(changeRoomMinMaxRanks({
-      minRank: newMinRank,
-      maxRank: maxRank
-    }))
+    dispatch(
+      changeRoomMinMaxRanks({
+        minRank: newMinRank,
+        maxRank: maxRank
+      })
+    )
   }
 
   const changeMaxRank = (newMaxRank: EloRank) => {
-    dispatch(changeRoomMinMaxRanks({
-      minRank: minRank,
-      maxRank: newMaxRank
-    }))
+    dispatch(
+      changeRoomMinMaxRanks({
+        minRank: minRank,
+        maxRank: newMaxRank
+      })
+    )
+  }
+
+  const changeSpecialRule = (rule: SpecialGameRule | "none") => {
+    dispatch(setSpecialRule(rule === "none" ? null : rule))
   }
 
   const headerMessage = (
     <>
       {gameMode === GameMode.RANKED && <p>{t("ranked_game_hint")}</p>}
 
-      {gameMode === GameMode.SCRIBBLE && (
+      {(gameMode === GameMode.SCRIBBLE || specialGameRule != null) && (
         <p>
           <img
             alt={t("smeargle_scribble")}
@@ -193,7 +194,11 @@ export default function PreparationMenu() {
       ) : null}
 
       {gameMode === GameMode.CUSTOM_LOBBY && users.length === 1 && (
-        <p>{BOTS_ENABLED ? t("add_bot_or_wait_hint") : t("wait_for_players_hint")}</p>
+        <p>
+          {BOTS_ENABLED
+            ? t("add_bot_or_wait_hint")
+            : t("wait_for_players_hint")}
+        </p>
       )}
     </>
   )
@@ -215,19 +220,50 @@ export default function PreparationMenu() {
     (isOwner || isAdmin) && (
       <button
         className="bubbly blue"
-        onClick={toggleElo}
+        onClick={toggleNoElo}
         title={noElo ? t("enable_elo_hint") : t("disable_elo_hint")}
       >
         {noElo ? t("enable_elo") : t("disable_elo")}
       </button>
     )
 
-  const minMaxRanks = gameMode === GameMode.CUSTOM_LOBBY && isOwner && !noElo && (
-    <>
-      <RankSelect label={t("minimum_rank")} value={minRank ?? EloRank.BEGINNER} onChange={changeMinRank} />
-      <RankSelect label={t("maximum_rank")} value={maxRank ?? EloRank.MASTERBALL} onChange={changeMaxRank} />
-    </>
-  )
+  const minMaxRanks = gameMode === GameMode.CUSTOM_LOBBY &&
+    isOwner &&
+    !noElo && (
+      <>
+        <RankSelect
+          label={t("minimum_rank")}
+          value={minRank ?? EloRank.LEVEL_BALL}
+          onChange={changeMinRank}
+        />
+        <RankSelect
+          label={t("maximum_rank")}
+          value={maxRank ?? EloRank.BEAST_BALL}
+          onChange={changeMaxRank}
+        />
+      </>
+    )
+
+  const scribbleRule = gameMode === GameMode.CUSTOM_LOBBY &&
+    isAdmin &&
+    noElo && (
+      <label>
+        {t("smeargle_scribble")}
+        <select
+          onChange={(e) =>
+            changeSpecialRule(e.target.value as SpecialGameRule)
+          }
+          value={specialGameRule ?? "none"}
+        >
+          <option value="none">{t("no_rule")}</option>
+          {Object.values(SpecialGameRule).map((rule) => (
+            <option key={rule} value={rule}>
+              {t("scribble." + rule)}
+            </option>
+          ))}
+        </select>
+      </label>
+    )
 
   const roomNameInput = gameMode === GameMode.CUSTOM_LOBBY &&
     (isModerator || isAdmin) &&
@@ -253,52 +289,58 @@ export default function PreparationMenu() {
       </div>
     )
 
-  const botControls = gameMode === GameMode.CUSTOM_LOBBY && (isOwner || isAdmin) && (
-    <div className="my-input-group">
-      <button
-        className="bubbly blue"
-        onClick={() => {
-          if (botDifficulty === BotDifficulty.CUSTOM) {
-            setShowBotSelectModal(true)
-          } else {
-            dispatch(addBot(botDifficulty))
-          }
-        }}
-      >
-        {t("add_bot")}
-      </button>
+  const botControls = gameMode === GameMode.CUSTOM_LOBBY &&
+    (isOwner || isAdmin) && (
+      <div className="my-input-group">
+        <button
+          className="bubbly blue"
+          onClick={() => {
+            if (botDifficulty === BotDifficulty.CUSTOM) {
+              setShowBotSelectModal(true)
+            } else {
+              dispatch(addBot(botDifficulty))
+            }
+          }}
+        >
+          {t("add_bot")}
+        </button>
 
-      <select
-        defaultValue={botDifficulty}
-        onChange={(e) => {
-          setBotDifficulty(parseInt(e.target.value))
-        }}
-      >
-        <option value={BotDifficulty.EASY}>{t("easy_bot")}</option>
-        <option value={BotDifficulty.MEDIUM}>{t("normal_bot")}</option>
-        <option value={BotDifficulty.HARD}>{t("hard_bot")}</option>
-        <option value={BotDifficulty.EXTREME}>{t("extreme_bot")}</option>
-        <option value={BotDifficulty.CUSTOM}>{t("custom_bot")}</option>
-      </select>
-    </div>
-  )
+        <select
+          defaultValue={botDifficulty}
+          onChange={(e) => {
+            setBotDifficulty(parseInt(e.target.value))
+          }}
+        >
+          <option value={BotDifficulty.EASY}>{t("easy_bot")}</option>
+          <option value={BotDifficulty.MEDIUM}>{t("normal_bot")}</option>
+          <option value={BotDifficulty.HARD}>{t("hard_bot")}</option>
+          <option value={BotDifficulty.EXTREME}>{t("extreme_bot")}</option>
+          <option value={BotDifficulty.CUSTOM}>{t("custom_bot")}</option>
+        </select>
+      </div>
+    )
 
   const roomInfo = gameMode === GameMode.CUSTOM_LOBBY && (
     <p className="room-info">
-      {password && <>{t("room_password")}: <b>{password}</b></>}
+      {password && (
+        <>
+          {t("room_password")}: <b>{password}</b>
+        </>
+      )}
     </p>
   )
 
-  const readyButton = (gameMode === GameMode.CUSTOM_LOBBY || !isReady) && users.length > 0 && (
-    <button
-      className={cc("bubbly", "ready-button", isReady ? "green" : "orange")}
-      onClick={() => {
-        dispatch(toggleReady())
-      }}
-    >
-      {t("ready")} {isReady ? "✔" : "?"}
-    </button>
-  )
+  const readyButton = (gameMode === GameMode.CUSTOM_LOBBY || !isReady) &&
+    users.length > 0 && (
+      <button
+        className={cc("bubbly", "ready-button", isReady ? "green" : "orange")}
+        onClick={() => {
+          dispatch(toggleReady(!isReady))
+        }}
+      >
+        {t("ready")} {isReady ? "✔" : "?"}
+      </button>
+    )
 
   const startGameButton = (isOwner || isAdmin) && (
     <button
@@ -317,7 +359,8 @@ export default function PreparationMenu() {
     <div className="preparation-menu my-container is-centered custom-bg">
       <header>
         <h1>
-          {formatMinMaxRanks(minRank, maxRank)} {name}: {users.length}/{nbExpectedPlayers}
+          {formatMinMaxRanks(minRank, maxRank)} {name}: {users.length}/
+          {nbExpectedPlayers}
         </h1>
         {headerMessage}
       </header>
@@ -337,17 +380,16 @@ export default function PreparationMenu() {
 
       <div className="actions">
         {roomNameInput}
-        <div className="spacer"></div>
-        {deleteRoomButton}
       </div>
 
-      {(BOTS_ENABLED || isAdmin) && <div className="actions">
-        {botControls}
-      </div>}
+      {(BOTS_ENABLED || isAdmin) && (
+        <div className="actions">{botControls}</div>
+      )}
 
       <div className="actions">
         {roomEloButton}
         {minMaxRanks}
+        {scribbleRule}
         <div className="spacer" />
       </div>
 
@@ -359,21 +401,36 @@ export default function PreparationMenu() {
         {startGameButton}
       </div>
 
-      {isOwner && showBotSelectModal && <BotSelectModal botsSelected={users.filter((u) => u.isBot).map(u => u.uid)} close={() => setShowBotSelectModal(false)} />}
+      {isOwner && showBotSelectModal && (
+        <BotSelectModal
+          botsSelected={users.filter((u) => u.isBot).map((u) => u.uid)}
+          close={() => setShowBotSelectModal(false)}
+        />
+      )}
     </div>
   )
 }
 
-export function RankSelect(props: { label: string; value: EloRank; onChange: (rank: EloRank) => void }) {
+export function RankSelect(props: {
+  label: string
+  value: EloRank
+  onChange: (rank: EloRank) => void
+}) {
   const { t } = useTranslation()
-  return <label>
-    {props.label}
-    <select value={props.value} onChange={e => props.onChange(e.target.value as EloRank)} style={{ marginLeft: '0.5em' }}>
-      {Object.values(EloRank).map((rank) => (
-        <option key={rank} value={rank}>
-          {t("elorank." + rank)} ({EloRankThreshold[rank]})
-        </option>
-      ))}
-    </select>
-  </label>
+  return (
+    <label>
+      {props.label}
+      <select
+        value={props.value}
+        onChange={(e) => props.onChange(e.target.value as EloRank)}
+        style={{ marginLeft: "0.5em" }}
+      >
+        {Object.values(EloRank).map((rank) => (
+          <option key={rank} value={rank}>
+            {t("elorank." + rank)} ({EloRankThreshold[rank]})
+          </option>
+        ))}
+      </select>
+    </label>
+  )
 }

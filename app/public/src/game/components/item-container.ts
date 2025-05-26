@@ -2,16 +2,21 @@ import { GameObjects } from "phaser"
 import {
   ArtificialItems,
   Berries,
+  Dishes,
+  HMs,
   Item,
   ShinyItems,
   SpecialItems,
+  TMs,
   WeatherRocks
 } from "../../../../types/enum/Item"
 import { getGameScene } from "../../pages/game"
-import { preferences } from "../../preferences"
+import { preference } from "../../preferences"
 import DraggableObject from "./draggable-object"
 import ItemDetail from "./item-detail"
 import ItemsContainer from "./items-container"
+import { DEPTH } from "../depths"
+import type GameScene from "../scenes/game-scene"
 
 export default class ItemContainer extends DraggableObject {
   detail: ItemDetail | undefined
@@ -50,18 +55,26 @@ export default class ItemContainer extends DraggableObject {
       )
     }
     this.add(this.circle)
+    const spriteName = TMs.includes(item)
+      ? "TM"
+      : HMs.includes(item)
+        ? "HM"
+        : item
     this.sprite = new GameObjects.Image(
       scene,
       0,
       0,
       "item",
-      item + ".png"
+      spriteName + ".png"
     ).setScale(pokemonId === null ? 0.5 : 0.25)
 
     this.add(this.sprite)
     this.setInteractive()
     this.updateDropZone(true)
-    this.draggable = this.pokemonId === null && playerId === currentPlayerUid
+    this.draggable =
+      this.pokemonId === null &&
+      playerId === currentPlayerUid &&
+      (scene as GameScene).spectate === false
   }
 
   get cellIndex() {
@@ -70,6 +83,8 @@ export default class ItemContainer extends DraggableObject {
     if (ArtificialItems.includes(this.name)) return 3
     if (WeatherRocks.includes(this.name)) return 4
     if (SpecialItems.includes(this.name)) return 5
+    if (TMs.includes(this.name) || HMs.includes(this.name)) return 6
+    if ((Dishes.map((d) => d) as Item[]).includes(this.name)) return 7
     return 0
   }
 
@@ -81,7 +96,7 @@ export default class ItemContainer extends DraggableObject {
 
   onPointerOver(pointer) {
     super.onPointerOver(pointer)
-    if (preferences.showDetailsOnHover && !this.detail?.visible) {
+    if (preference("showDetailsOnHover") && !this.detail?.visible) {
       this.mouseoutTimeout && clearTimeout(this.mouseoutTimeout)
       this.openDetail()
     }
@@ -99,7 +114,7 @@ export default class ItemContainer extends DraggableObject {
     if (this.draggable) {
       this.circle?.setFrame(this.cellIndex * 3)
     }
-    if (preferences.showDetailsOnHover) {
+    if (preference("showDetailsOnHover")) {
       this.mouseoutTimeout = setTimeout(
         () => {
           if (this.detail?.visible) {
@@ -111,10 +126,14 @@ export default class ItemContainer extends DraggableObject {
     }
   }
 
-  onPointerDown(pointer: Phaser.Input.Pointer) {
-    super.onPointerDown(pointer)
+  onPointerDown(
+    pointer: Phaser.Input.Pointer,
+    event: Phaser.Types.Input.EventData
+  ) {
+    super.onPointerDown(pointer, event)
     this.parentContainer.bringToTop(this)
-    if (pointer.rightButtonDown() && !preferences.showDetailsOnHover) {
+    event.stopPropagation()
+    if (pointer.rightButtonDown() && !preference("showDetailsOnHover")) {
       if (!this.detail?.visible) {
         this.openDetail()
         this.updateDropZone(false)
@@ -136,7 +155,7 @@ export default class ItemContainer extends DraggableObject {
 
       if (this.detail === undefined) {
         this.detail = new ItemDetail(this.scene, 0, 0, this.name)
-        this.detail.setDepth(100)
+        this.detail.setDepth(DEPTH.TOOLTIP)
         this.detail.setPosition(
           this.detail.width * 0.5 + 40,
           this.detail.height * 0.5
@@ -146,7 +165,7 @@ export default class ItemContainer extends DraggableObject {
           this.mouseoutTimeout && clearTimeout(this.mouseoutTimeout)
         })
         this.detail.dom.addEventListener("mouseleave", () => {
-          if (preferences.showDetailsOnHover) {
+          if (preference("showDetailsOnHover")) {
             this.mouseoutTimeout = setTimeout(
               () => {
                 if (this.detail?.visible) {
@@ -189,7 +208,7 @@ export default class ItemContainer extends DraggableObject {
       item + ".png"
     ).setScale(this.pokemonId === null ? 0.5 : 0.25)
     this.tempDetail = new ItemDetail(this.scene, 0, 0, item)
-    this.tempDetail.setDepth(100)
+    this.tempDetail.setDepth(DEPTH.TOOLTIP)
     this.tempDetail.setPosition(
       this.tempDetail.width * 0.5 + 40,
       this.tempDetail.height * 0.5 + 40

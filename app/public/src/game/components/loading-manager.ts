@@ -2,13 +2,19 @@ import { t } from "i18next"
 import { GameObjects } from "phaser"
 import AnimatedTiles from "phaser-animated-tiles-phaser3.5/dist/AnimatedTiles.min.js"
 import pkg from "../../../../../package.json"
-import { DungeonDetails } from "../../../../types/enum/Dungeon"
+import {
+  DungeonDetails,
+  DungeonMusic,
+  DungeonPMDO
+} from "../../../../types/enum/Dungeon"
 import { values } from "../../../../utils/schemas"
 import indexList from "../../../src/assets/pokemons/indexList.json"
 import atlas from "../../assets/atlas.json"
 import { preloadMusic } from "../../pages/utils/audio"
-import { getPortraitSrc } from "../../utils"
+import { getPortraitSrc } from "../../../../utils/avatar"
 import GameScene from "../scenes/game-scene"
+import { getPkmWithCustom } from "../../../../models/colyseus-models/pokemon-customs"
+import type Player from "../../../../models/colyseus-models/player"
 
 export default class LoadingManager {
   scene: Phaser.Scene
@@ -41,21 +47,99 @@ export default class LoadingManager {
       "animatedTiles",
       "animatedTiles"
     )
-    indexList.forEach((id) => {
-      scene.load.image(`portrait-${id}`, getPortraitSrc(id))
-      scene.load.multiatlas(
-        id,
-        `/assets/pokemons/${id}.json`,
-        "/assets/pokemons"
-      )
-    })
+    scene.load.json("pokemons-atlas", `/assets/pokemons.json?v=${pkg.version}`)
+    scene.load.once(
+      "filecomplete-json-pokemons-atlas",
+      (key, type, compressedAtlas) => {
+        for (const image in compressedAtlas) {
+          const data = compressedAtlas[image]
+
+          function traverse(obj: any, path: string, frames) {
+            if (Array.isArray(obj)) {
+              const [
+                sourceSizew,
+                sourceSizeh,
+                spriteSourceSizex,
+                spriteSourceSizey,
+                spriteSourceSizew,
+                spriteSourceSizeh,
+                framex,
+                framey,
+                framew,
+                frameh
+              ] = obj
+              frames.push({
+                filename: path,
+                rotated: false,
+                trimmed: true,
+                sourceSize: {
+                  w: sourceSizew,
+                  h: sourceSizeh
+                },
+                spriteSourceSize: {
+                  x: spriteSourceSizex,
+                  y: spriteSourceSizey,
+                  w: spriteSourceSizew,
+                  h: spriteSourceSizeh
+                },
+                frame: {
+                  x: framex,
+                  y: framey,
+                  w: framew,
+                  h: frameh
+                }
+              })
+            } else if (obj instanceof Object) {
+              for (const key in obj) {
+                traverse(obj[key], path ? path + "/" + key : key, frames)
+              }
+            }
+          }
+          const frames = []
+
+          traverse(data.a, "", frames)
+
+          const multiatlas = {
+            textures: [
+              {
+                image: `${image}?v=${pkg.version}`,
+                format: "RGBA8888",
+                size: {
+                  w: data.s[0],
+                  h: data.s[1]
+                },
+                scale: data.s[2] ?? 1,
+                frames
+              }
+            ]
+          }
+
+          const index = image.replace(".png", "")
+          //console.log("load multiatlas " + index)
+          // @ts-ignore: there is an error in phaser types, the second parameter can be an object
+          scene.load.multiatlas(index, multiatlas, "/assets/pokemons")
+        }
+      }
+    )
 
     if (scene instanceof GameScene) {
       const players = values(scene.room?.state.players!)
       const player = players.find((p) => p.id === scene.uid) ?? players[0]
-      await scene.preloadMaps(players.map((p) => p.map))
+      await scene.preloadMaps(
+        players
+          .map((p) => p.map)
+          .filter<DungeonPMDO>((map): map is DungeonPMDO => map !== "town")
+      )
       preloadMusic(scene, DungeonDetails[player.map].music)
+      preloadPortraits(this.scene, player)
     }
+
+    scene.load.image("town_tileset", "/assets/tilesets/Town/tileset.png")
+    scene.load.tilemapTiledJSON("town", "/assets/tilesets/Town/town.json")
+    preloadMusic(scene, DungeonMusic.TREASURE_TOWN_STAGE_0)
+    preloadMusic(scene, DungeonMusic.TREASURE_TOWN_STAGE_10)
+    preloadMusic(scene, DungeonMusic.TREASURE_TOWN_STAGE_20)
+
     scene.load.image("rain", "/assets/ui/rain.png")
     scene.load.image("sand", "/assets/ui/sand.png")
     scene.load.image("wind", "/assets/ui/wind.png")
@@ -78,14 +162,25 @@ export default class LoadingManager {
         frameWidth: 64,
         frameHeight: 64,
         startFrame: 0,
-        endFrame: 17
+        endFrame: 23
+      }
+    })
+
+    scene.load.spritesheet({
+      key: "board_cell",
+      url: "/assets/ui/board_cell.png",
+      frameConfig: {
+        frameWidth: 32,
+        frameHeight: 32,
+        startFrame: 0,
+        endFrame: 1
       }
     })
 
     for (const pack in atlas.packs) {
       scene.load.multiatlas(
         atlas.packs[pack].name,
-        `/assets/${pack}/${atlas.packs[pack].name}-${pkg.version.replaceAll(".", "_")}.json`,
+        `/assets/${pack}/${atlas.packs[pack].name}-${pkg.version}.json`,
         `/assets/${pack}/`
       )
     }
@@ -110,10 +205,19 @@ export function loadEnvironmentMultiAtlas(scene: Phaser.Scene) {
     "/assets/environment/shine.json",
     "/assets/environment/"
   )
-
   scene.load.multiatlas(
     "berry_trees",
     "/assets/environment/berry_trees.json",
     "/assets/environment/"
   )
+}
+
+export function preloadPortraits(scene: Phaser.Scene, player: Player) {
+  indexList.forEach((index) => {
+    const pokemonCustom = getPkmWithCustom(index, player.pokemonCustoms)
+    scene.load.image(
+      `portrait-${index}`,
+      getPortraitSrc(index, pokemonCustom.shiny, pokemonCustom.emotion)
+    )
+  })
 }

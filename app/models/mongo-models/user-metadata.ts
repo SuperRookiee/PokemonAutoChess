@@ -12,20 +12,22 @@ export interface IUserMetadata {
   exp: number
   level: number
   elo: number
-  pokemonCollection: Map<string, IPokemonConfig>
+  pokemonCollection: Map<string, IPokemonCollectionItem>
   booster: number
   titles: Title[]
   title: "" | Title
   role: Role
+  banned?: boolean
 }
 
-export interface IPokemonConfig {
+export interface IPokemonCollectionItem {
   dust: number
   emotions: Emotion[] | ArraySchema<Emotion>
   shinyEmotions: Emotion[] | ArraySchema<Emotion>
-  selectedEmotion: Emotion
+  selectedEmotion: Emotion | null
   selectedShiny: boolean
   id: string
+  played: number
 }
 
 const userMetadataSchema = new Schema({
@@ -71,6 +73,10 @@ const userMetadataSchema = new Schema({
     enum: Role,
     default: Role.BASIC
   },
+  banned: {
+    type: Boolean,
+    default: false
+  },
   titles: [
     {
       type: String,
@@ -104,6 +110,10 @@ const userMetadataSchema = new Schema({
       },
       id: {
         type: String
+      },
+      played: {
+        type: Number,
+        default: 0
       }
     }
   }

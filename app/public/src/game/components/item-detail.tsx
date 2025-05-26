@@ -3,9 +3,9 @@ import React, { useMemo } from "react"
 import ReactDOM from "react-dom/client"
 import { useTranslation } from "react-i18next"
 import { Tooltip } from "react-tooltip"
-import { ItemStats } from "../../../../types/Config"
+import { ItemStats } from "../../../../core/items"
 import { Stat } from "../../../../types/enum/Game"
-import { Item, ItemRecipe } from "../../../../types/enum/Item"
+import { HMs, Item, ItemRecipe, TMs } from "../../../../types/enum/Item"
 import { addIconsToDescription } from "../../pages/utils/descriptions"
 import "./item-detail.css"
 
@@ -24,11 +24,8 @@ export function ItemDetailTooltip({
   )
 
   const formatStat = (stat: Stat, value: number) => {
-    if ([Stat.CRIT_POWER].includes(stat)) {
-      value = Math.round(value * 100)
-    }
     let output = value.toString()
-    if ([Stat.ATK_SPEED, Stat.CRIT_CHANCE, Stat.CRIT_POWER].includes(stat)) {
+    if ([Stat.CRIT_CHANCE, Stat.CRIT_POWER].includes(stat)) {
       output += "%"
     }
     if (value >= 0) {
@@ -37,10 +34,35 @@ export function ItemDetailTooltip({
     return output
   }
 
+  const getImageFilename = () => {
+    if (TMs.includes(item)) { return "TM" }
+    if (HMs.includes(item)) { return "HM" }
+    return item
+  }
+
   return (
     <div className="game-item-detail">
-      <img className="game-item-detail-icon" src={`assets/item/${item}.png`} />
-      <p className="game-item-detail-name">{t(`item.${item}`)}</p>
+      <img
+        className="game-item-detail-icon"
+        src={`assets/item/${getImageFilename()}.png`}
+      />
+      <div className="game-item-detail-name">
+        {ItemRecipe[item] && (
+          <div className="game-item-recipe">
+            {ItemRecipe[item]?.map((item, i) => (
+              <React.Fragment key={`component_${i}_${item}`}>
+                <img
+                  className="game-item-detail-icon"
+                  src={`assets/item/${item}.png`}
+                  key={item}
+                />
+                {i === 0 && " + "}
+              </React.Fragment>
+            ))}
+          </div>
+        )}
+        {t(`item.${item}`)}
+      </div>
       <div className="game-item-detail-stats">
         {Object.entries(ItemStats[item] ?? {}).map(([stat, value]) => (
           <div key={stat}>

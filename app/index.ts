@@ -1,3 +1,4 @@
+import { Encoder } from "@colyseus/schema"
 /**
  * IMPORTANT:
  * ---------
@@ -15,16 +16,23 @@ import app from "./app.config"
 import { initializeMetrics } from "./metrics"
 import { initCronJobs } from "./services/cronjobs"
 import { fetchLeaderboards } from "./services/leaderboard"
+import { fetchMetaReports } from "./services/meta"
+import { fetchBots } from "./services/bots"
+
+/*
+Changed buffer size to 512kb to avoid warnings from colyseus. We need to scale down the amount of data we're sending so it gets sent in multiple packets or increase the buffer size even more.
+I think the buffer size is a bit of a sanity check, the only time I've really seen it needed is if you have infra requirements for buffer sizes, for instance working with steamworks the max packet size is 512kb
+ */
+Encoder.BUFFER_SIZE = 512 * 1024
 
 async function main() {
-  fetchLeaderboards()
-  setInterval(() => fetchLeaderboards(), 1000 * 60 * 10) // refresh every 10 minutes
-
   if (process.env.NODE_APP_INSTANCE) {
-    const processNumber = Number(process.env.NODE_APP_INSTANCE || "0")
+    const processNumber = Number(process.env.NODE_APP_INSTANCE ?? "0")
+    const port = (Number(process.env.PORT) ?? 2569) + processNumber
     initializeMetrics()
     await listen(app)
-    if (processNumber === 0) {
+    if (port === 2569) {
+      // only the first thread of the first instance will create the lobby and init cron jobs
       await matchMaker.createRoom("lobby", {})
       checkLobby()
       initCronJobs()
@@ -34,6 +42,17 @@ async function main() {
     await matchMaker.createRoom("lobby", {})
     initCronJobs()
   }
+
+  logger.info("Fetching bots...")
+  await fetchBots()
+  logger.info("Bots fetched")
+  setInterval(() => fetchBots(), 1000 * 60 * 24) // refresh every 24 hours
+  logger.info("Fetching leaderboards...")
+  fetchLeaderboards()
+  setInterval(() => fetchLeaderboards(), 1000 * 60 * 10) // refresh every 10 minutes
+  logger.info("Fetching meta reports...")
+  fetchMetaReports()
+  setInterval(() => fetchMetaReports(), 1000 * 60 * 60 * 24) // refresh every 24 hours
 }
 
 function checkLobby() {
@@ -42,9 +61,9 @@ function checkLobby() {
     cronTime: "* * * * *",
     timeZone: "Europe/Paris",
     onTick: async () => {
-      logger.debug(`Refresh lobby room`)
       const lobbies = await matchMaker.query({ name: "lobby" })
-      if(lobbies.length === 0) {
+      if (lobbies.length === 0) {
+        logger.warn(`Lobby room has not been found, automatically remaking one`)
         matchMaker.createRoom("lobby", {})
       }
     },

@@ -14,12 +14,14 @@ import {
   Transfer
 } from "../../../types"
 import { EloRank } from "../../../types/Config"
+import { ConnectionStatus } from "../../../types/enum/ConnectionStatus"
 import { BotDifficulty } from "../../../types/enum/Game"
 import { Item } from "../../../types/enum/Item"
 import { Language } from "../../../types/enum/Language"
 import { PkmProposition } from "../../../types/enum/Pokemon"
+import { SpecialGameRule } from "../../../types/enum/SpecialGameRule"
 import { logger } from "../../../utils/logger"
-import { getAvatarString } from "../utils"
+import { getAvatarString } from "../../../utils/avatar"
 
 export interface INetwork {
   client: Client
@@ -30,6 +32,8 @@ export interface INetwork {
   uid: string
   displayName: string
   profile: IUserMetadata | undefined
+  pendingGameId: string | null
+  connectionStatus: ConnectionStatus
   error: string | null
 }
 
@@ -47,7 +51,9 @@ const initalState: INetwork = {
   uid: "",
   displayName: "",
   profile: undefined,
-  error: null
+  pendingGameId: null,
+  error: null,
+  connectionStatus: ConnectionStatus.PENDING
 }
 
 export const networkSlice = createSlice({
@@ -155,11 +161,11 @@ export const networkSlice = createSlice({
     removeBot: (state, action: PayloadAction<string>) => {
       state.preparation?.send(Transfer.REMOVE_BOT, action.payload)
     },
-    toggleReady: (state, action: PayloadAction<boolean | undefined>) => {
+    toggleReady: (state, action: PayloadAction<boolean>) => {
       state.preparation?.send(Transfer.TOGGLE_READY, action.payload)
     },
-    toggleEloRoom: (state, action: PayloadAction<boolean>) => {
-      state.preparation?.send(Transfer.TOGGLE_NO_ELO, action.payload)
+    setNoElo: (state, action: PayloadAction<boolean>) => {
+      state.preparation?.send(Transfer.CHANGE_NO_ELO, action.payload)
     },
     lockShop: (state) => {
       state.game?.send(Transfer.LOCK)
@@ -196,17 +202,24 @@ export const networkSlice = createSlice({
     ) => {
       state.preparation?.send(Transfer.CHANGE_ROOM_RANKS, action.payload)
     },
+    setSpecialRule: (state, action: PayloadAction<SpecialGameRule | null>) => {
+      state.preparation?.send(Transfer.CHANGE_SPECIAL_RULE, action.payload)
+    },
     changeSelectedEmotion: (
       state,
-      action: PayloadAction<{ index: string; emotion: Emotion; shiny: boolean }>
+      action: PayloadAction<{
+        index: string
+        emotion: Emotion | null
+        shiny: boolean
+      }>
     ) => {
       if (state.profile) {
-        const pokemonConfig = state.profile.pokemonCollection.get(
+        const pokemonCollectionItem = state.profile.pokemonCollection.get(
           action.payload.index
         )
-        if (pokemonConfig) {
-          pokemonConfig.selectedEmotion = action.payload.emotion
-          pokemonConfig.selectedShiny = action.payload.shiny
+        if (pokemonCollectionItem) {
+          pokemonCollectionItem.selectedEmotion = action.payload.emotion
+          pokemonCollectionItem.selectedShiny = action.payload.shiny
         }
       }
       state.lobby?.send(Transfer.CHANGE_SELECTED_EMOTION, action.payload)
@@ -233,11 +246,14 @@ export const networkSlice = createSlice({
       if (state.profile) state.profile.title = action.payload
       state.lobby?.send(Transfer.SET_TITLE, action.payload)
     },
-    removeTournament: (state, action: PayloadAction<{ id: string }>) => {
-      state.lobby?.send(Transfer.REMOVE_TOURNAMENT, action.payload)
+    deleteTournament: (state, action: PayloadAction<{ id: string }>) => {
+      state.lobby?.send(Transfer.DELETE_TOURNAMENT, action.payload)
     },
-    createTournamentLobbies: (state, action: PayloadAction<{ id: string }>) => {
-      state.lobby?.send(Transfer.REMAKE_TOURNAMENT_LOBBIES, action.payload)
+    remakeTournamentLobby: (
+      state,
+      action: PayloadAction<{ tournamentId: string; bracketId: string }>
+    ) => {
+      state.lobby?.send(Transfer.REMAKE_TOURNAMENT_LOBBY, action.payload)
     },
     participateInTournament: (
       state,
@@ -254,6 +270,9 @@ export const networkSlice = createSlice({
     heapSnapshot: (state) => {
       state.lobby?.send(Transfer.HEAP_SNAPSHOT)
     },
+    deleteAccount: (state) => {
+      state.lobby?.send(Transfer.DELETE_ACCOUNT)
+    },
     giveRole: (state, action: PayloadAction<{ uid: string; role: Role }>) => {
       state.lobby?.send(Transfer.SET_ROLE, action.payload)
     },
@@ -266,20 +285,11 @@ export const networkSlice = createSlice({
     kick: (state, action: PayloadAction<string>) => {
       state.preparation?.send(Transfer.KICK, action.payload)
     },
-    deleteRoom: (state) => {
-      state.preparation?.send(Transfer.DELETE_ROOM)
-    },
     ban: (state, action: PayloadAction<{ uid: string; reason: string }>) => {
       state.lobby?.send(Transfer.BAN, action.payload)
     },
     unban: (state, action: PayloadAction<{ uid: string; name: string }>) => {
       state.lobby?.send(Transfer.UNBAN, action.payload)
-    },
-    deleteBotDatabase: (state, action: PayloadAction<string>) => {
-      state.lobby?.send(Transfer.DELETE_BOT_DATABASE, action.payload)
-    },
-    addBotDatabase: (state, action: PayloadAction<string>) => {
-      state.lobby?.send(Transfer.ADD_BOT_DATABASE, action.payload)
     },
     selectLanguage: (state, action: PayloadAction<Language>) => {
       state.lobby?.send(Transfer.SELECT_LANGUAGE, action.payload)
@@ -292,6 +302,12 @@ export const networkSlice = createSlice({
     },
     setErrorAlertMessage: (state, action: PayloadAction<string | null>) => {
       state.error = action.payload
+    },
+    setConnectionStatus: (state, action: PayloadAction<ConnectionStatus>) => {
+      state.connectionStatus = action.payload
+    },
+    setPendingGameId: (state, action: PayloadAction<string | null>) => {
+      state.pendingGameId = action.payload
     }
   }
 })
@@ -300,15 +316,13 @@ export const {
   heapSnapshot,
   selectLanguage,
   unban,
-  deleteBotDatabase,
-  addBotDatabase,
   ban,
   pokemonPropositionClick,
   giveTitle,
   giveRole,
   removeMessage,
-  removeTournament,
-  createTournamentLobbies,
+  deleteTournament,
+  remakeTournamentLobby,
   participateInTournament,
   giveBooster,
   showEmote,
@@ -319,6 +333,7 @@ export const {
   changeRoomName,
   changeRoomPassword,
   changeRoomMinMaxRanks,
+  setSpecialRule,
   gameStartRequest,
   logIn,
   logOut,
@@ -334,7 +349,7 @@ export const {
   addBot,
   removeBot,
   toggleReady,
-  toggleEloRoom,
+  setNoElo,
   itemClick,
   shopClick,
   levelClick,
@@ -342,9 +357,11 @@ export const {
   searchById,
   setTitle,
   kick,
-  deleteRoom,
   createTournament,
-  setErrorAlertMessage
+  setConnectionStatus,
+  setErrorAlertMessage,
+  deleteAccount,
+  setPendingGameId
 } = networkSlice.actions
 
 export default networkSlice.reducer

@@ -5,7 +5,7 @@ import {
   IDetailledPokemon
 } from "../../../../../models/mongo-models/bot-v2"
 import PokemonFactory from "../../../../../models/pokemon-factory"
-import { Emotion, PkmWithConfig } from "../../../../../types"
+import { Emotion, PkmWithCustom } from "../../../../../types"
 import { Item } from "../../../../../types/enum/Item"
 import { Pkm } from "../../../../../types/enum/Pokemon"
 import { Synergy } from "../../../../../types/enum/Synergy"
@@ -15,21 +15,22 @@ import ItemPicker from "./item-picker"
 import PokemonPicker from "./pokemon-picker"
 import SelectedEntity from "./selected-entity"
 import TeamEditor from "./team-editor"
-import "./team-builder.css"
 import { useTranslation } from "react-i18next"
 import { useLocation } from "react-router-dom"
 import { selectCurrentPlayer, useAppSelector } from "../../../hooks"
 import { values } from "../../../../../utils/schemas"
+import { isOnBench } from "../../../../../utils/board"
+import "./team-builder.css"
 
 export default function TeamBuilder(props: {
   bot?: IBot
-  onChangeAvatar?: (pkm: PkmWithConfig) => void
+  onChangeAvatar?: (pkm: PkmWithCustom) => void
   board: IDetailledPokemon[]
   updateBoard: (board: IDetailledPokemon[]) => void
   error?: string
 }) {
   const { t } = useTranslation()
-  const [selection, setSelection] = useState<Item | PkmWithConfig>({
+  const [selection, setSelection] = useState<Item | PkmWithCustom>({
     name: Pkm.MAGIKARP,
     shiny: false,
     emotion: Emotion.NORMAL
@@ -55,8 +56,8 @@ export default function TeamBuilder(props: {
     const map = computeSynergies(
       board.map((p) => {
         const pkm = PokemonFactory.createPokemonFromName(p.name, {
-          selectedEmotion: p.emotion,
-          selectedShiny: p.shiny
+          emotion: p.emotion,
+          shiny: p.shiny
         })
         pkm.positionX = p.x
         pkm.positionY = p.y
@@ -69,7 +70,7 @@ export default function TeamBuilder(props: {
     return [...map.entries()]
   }, [board])
 
-  function addPokemon(x: number, y: number, pkm: PkmWithConfig) {
+  function addPokemon(x: number, y: number, pkm: PkmWithCustom) {
     let existingItems
     const i = board.findIndex((p) => p.x === x && p.y === y)
     if (i >= 0) {
@@ -122,8 +123,8 @@ export default function TeamBuilder(props: {
     } else if (pokemonOnCell) {
       setSelection(pokemonOnCell)
       setSelectedPokemon(pokemonOnCell)
-    } else if (Object.values(Pkm).includes((selection as PkmWithConfig).name)) {
-      addPokemon(x, y, selection as PkmWithConfig)
+    } else if (Object.values(Pkm).includes((selection as PkmWithCustom).name)) {
+      addPokemon(x, y, selection as PkmWithCustom)
     } else if (Object.keys(Item).includes(selection as Item)) {
       addItem(x, y, selection as Item)
     }
@@ -147,7 +148,7 @@ export default function TeamBuilder(props: {
         updateBoard([...board])
       }
     } else if (e.dataTransfer.getData("pokemon") != "") {
-      const pkm: PkmWithConfig = {
+      const pkm: PkmWithCustom = {
         name: e.dataTransfer.getData("pokemon") as Pkm,
         emotion: Emotion.NORMAL,
         shiny: false
@@ -161,7 +162,25 @@ export default function TeamBuilder(props: {
     }
   }
 
-  function updateSelectedPokemon(pkm: PkmWithConfig) {
+  function getFirstEmptyCell(): { x: number; y: number } | null {
+    for (let y = 1; y < 3; y++) {
+      for (let x = 0; x < 8; x++) {
+        if (board.find(p => p.x === x && p.y === y) === undefined) {
+          return { x, y }
+        }
+      }
+    }
+    return null
+  }
+
+  function addPokemonOnFirstEmptyCell(entity: PkmWithCustom) {
+    const firstEmptyCell = getFirstEmptyCell()
+    if (firstEmptyCell) {
+      addPokemon(firstEmptyCell.x, firstEmptyCell.y, entity)
+    }
+  }
+
+  function updateSelectedPokemon(pkm: PkmWithCustom) {
     setSelection(pkm)
     if (selectedPokemon != null) {
       selectedPokemon.emotion = pkm.emotion
@@ -174,16 +193,16 @@ export default function TeamBuilder(props: {
     if (
       selection &&
       props.onChangeAvatar &&
-      Object.values(Pkm).includes((selection as PkmWithConfig).name)
+      Object.values(Pkm).includes((selection as PkmWithCustom).name)
     ) {
-      props.onChangeAvatar(selection as PkmWithConfig)
+      props.onChangeAvatar(selection as PkmWithCustom)
     }
   }
 
   function snapshot() {
     try {
       if (!currentPlayer) return;
-      updateBoard(values(currentPlayer.board).filter(pokemon => !pokemon.isOnBench).map(p => {
+      updateBoard(values(currentPlayer.board).filter(pokemon => !isOnBench(pokemon)).map(p => {
         return {
           name: p.name,
           emotion: p.emotion,
@@ -224,11 +243,15 @@ export default function TeamBuilder(props: {
       const reader = new FileReader()
       reader.onload = async (e) => {
         if (!e.target) return
-        const data = JSON.parse(e.target.result as string)
-        if (data.length == 0) {
+        try {
+          const data = JSON.parse(e.target.result as string)
+          if (!data || !Array.isArray(data)) {
+            throw new Error("Invalid file content")
+          } else {
+            updateBoard(data)
+          }
+        } catch (e) {
           alert("Invalid file")
-        } else {
-          updateBoard(data)
         }
       }
       reader.readAsText(file)
@@ -252,7 +275,7 @@ export default function TeamBuilder(props: {
       />
       <SelectedEntity entity={selection} onChange={updateSelectedPokemon} />
       <ItemPicker selectEntity={setSelection} selected={selection} />
-      <PokemonPicker selectEntity={setSelection} selected={selection} />
+      <PokemonPicker selectEntity={e => setSelection(e as PkmWithCustom | Item)} addEntity={addPokemonOnFirstEmptyCell} selected={selection} />
       {props.bot && props.onChangeAvatar && (
         <BotAvatar
           bot={props.bot}

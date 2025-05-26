@@ -12,24 +12,14 @@
   background-color: var(--color-bg-primary) !important;
 }
 
-.toast-new-pokemon {
+.toast-new-pokemon,
+.toast-level-up {
   right: 76px !important;
+  color: white !important;
 }
 
 .toast-new-pokemon img {
   width: 40px;
   height: 40px;
-  image-rendering: pixelated;
-}
-
-.toast-emote {
-  right: 85px !important;
-  border: none !important;
-  background-color: transparent !important;
-}
-
-.toast-emote img {
-  width: 80px;
-  height: 80px;
   image-rendering: pixelated;
 }

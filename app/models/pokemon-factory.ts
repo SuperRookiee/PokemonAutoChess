@@ -1,37 +1,37 @@
 import { MapSchema } from "@colyseus/schema"
-import { Emotion, IPlayer } from "../types"
+import { Emotion, IPlayer, PkmCustom } from "../types"
 import { Pkm, PkmFamily, PkmIndex } from "../types/enum/Pokemon"
 import { logger } from "../utils/logger"
 import { Pokemon, PokemonClasses } from "./colyseus-models/pokemon"
 import { PVEStage } from "./pve-stages"
+import { TownEncounter, TownEncounters } from "../core/town-encounters"
+import { getPkmWithCustom } from "./colyseus-models/pokemon-customs"
+import Player from "./colyseus-models/player"
 
 export default class PokemonFactory {
   static makePveBoard(
     pveStage: PVEStage,
-    shinyEncounter: boolean
+    shinyEncounter: boolean,
+    townEncounter: TownEncounter | null
   ): MapSchema<Pokemon> {
     const pokemons = new MapSchema<Pokemon>()
-    pveStage.board.forEach(([pkm, x, y]) => {
+    pveStage.board.forEach(([pkm, x, y], index) => {
       const pokemon = PokemonFactory.createPokemonFromName(pkm, {
-        selectedEmotion: pveStage.emotion ?? Emotion.NORMAL,
-        selectedShiny: shinyEncounter
+        emotion: pveStage.emotion ?? Emotion.NORMAL,
+        shiny: shinyEncounter
       })
       pokemon.positionX = x
       pokemon.positionY = y
+      if (
+        townEncounter === TownEncounters.MAROWAK &&
+        pveStage.marowakItems &&
+        index in pveStage.marowakItems
+      ) {
+        pveStage.marowakItems[index]!.forEach((item) => pokemon.items.add(item))
+      }
       pokemons.set(pokemon.id, pokemon)
     })
     return pokemons
-  }
-
-  // transforms a pokemon into another pokemon,
-  // transferring its items and position to
-  // the new pokemon
-  static transformPokemon(before: Pokemon, afterName: Pkm, player?: IPlayer) {
-    const transformation = this.createPokemonFromName(afterName, player)
-    transformation.positionX = before.positionX
-    transformation.positionY = before.positionY
-    transformation.items = before.items
-    return transformation
   }
 
   static getPokemonBaseEvolution(name: Pkm) {
@@ -54,23 +54,32 @@ export default class PokemonFactory {
       case Pkm.WORMADAM_TRASH:
         return Pkm.BURMY_TRASH
       default:
+        if (PkmFamily[name] == Pkm.UNOWN_A) {
+          return name
+        }
         return PkmFamily[name]
     }
   }
 
   static createPokemonFromName(
     name: Pkm,
-    config?: IPlayer | { selectedShiny?: boolean; selectedEmotion?: Emotion }
+    custom?: PkmCustom | Player
   ): Pokemon {
-    if (config && "pokemonCollection" in config) {
-      config = config.pokemonCollection.get(PkmIndex[name])
+    let shiny = false
+    let emotion = Emotion.NORMAL
+    if (custom && "pokemonCustoms" in custom) {
+      const pkmWithCustom = getPkmWithCustom(
+        PkmIndex[name],
+        (custom as IPlayer).pokemonCustoms
+      )
+      shiny = pkmWithCustom.shiny ?? false
+      emotion = pkmWithCustom.emotion ?? Emotion.NORMAL
+    } else if (custom) {
+      shiny = custom.shiny ?? false
+      emotion = custom.emotion ?? Emotion.NORMAL
     }
-    const shiny = config && config.selectedShiny ? true : false
-    const emotion =
-      config && config.selectedEmotion ? config.selectedEmotion : Emotion.NORMAL
     if (name in PokemonClasses) {
       const PokemonClass = PokemonClasses[name]
-
       return new PokemonClass(shiny, emotion)
     } else {
       logger.warn(`No pokemon with name "${name}" found, return MissingNo`)

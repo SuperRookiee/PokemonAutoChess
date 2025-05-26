@@ -1,7 +1,16 @@
 import path from "path"
 import { monitor } from "@colyseus/monitor"
 import config from "@colyseus/tools"
-import { RedisDriver, RedisPresence, ServerOptions, matchMaker } from "colyseus"
+import { uWebSocketsTransport } from "@colyseus/uwebsockets-transport"
+import uWebSockets from "uWebSockets.js"
+import {
+  Presence,
+  RedisDriver,
+  RedisPresence,
+  ServerOptions,
+  matchMaker
+} from "colyseus"
+import helmet from "helmet"
 import cors from "cors"
 import express, { ErrorRequestHandler } from "express"
 import basicAuth from "express-basic-auth"
@@ -11,20 +20,23 @@ import pkg from "../package.json"
 import { initTilemap } from "./core/design"
 import { GameRecord } from "./models/colyseus-models/game-record"
 import DetailledStatistic from "./models/mongo-models/detailled-statistic-v2"
-import ItemsStatistics from "./models/mongo-models/items-statistic"
 import Meta from "./models/mongo-models/meta"
-import PokemonsStatistics from "./models/mongo-models/pokemons-statistic-v2"
 import TitleStatistic from "./models/mongo-models/title-statistic"
+import UserMetadata from "./models/mongo-models/user-metadata"
 import { PRECOMPUTED_POKEMONS_PER_TYPE } from "./models/precomputed/precomputed-types"
 import AfterGameRoom from "./rooms/after-game-room"
 import CustomLobbyRoom from "./rooms/custom-lobby-room"
 import GameRoom from "./rooms/game-room"
 import PreparationRoom from "./rooms/preparation-room"
-import { getBotData, getBotsList } from "./services/bots"
-import { discordService } from "./services/discord"
+import {
+  addBotToDatabase,
+  approveBot,
+  deleteBotFromDatabase,
+  getBotData,
+  getBotsList
+} from "./services/bots"
 import { getLeaderboard } from "./services/leaderboard"
-import { pastebinService } from "./services/pastebin"
-import { Title } from "./types"
+import { getMetadata, getMetaItems, getMetaPokemons } from "./services/meta"
 import {
   MAX_CONCURRENT_PLAYERS_ON_SERVER,
   MAX_POOL_CONNECTIONS_SIZE,
@@ -34,6 +46,9 @@ import { DungeonPMDO } from "./types/enum/Dungeon"
 import { Item } from "./types/enum/Item"
 import { Pkm, PkmIndex } from "./types/enum/Pokemon"
 import { logger } from "./utils/logger"
+import chatV2 from "./models/mongo-models/chat-v2"
+import { UserRecord } from "firebase-admin/lib/auth/user-record"
+import { Role } from "./types"
 
 const clientSrc = __dirname.includes("server")
   ? path.join(__dirname, "..", "..", "client")
@@ -48,9 +63,11 @@ let gameOptions: ServerOptions = {}
 
 if (process.env.NODE_APP_INSTANCE) {
   const processNumber = Number(process.env.NODE_APP_INSTANCE || "0")
-  const port = (Number(process.env.PORT) || 2567) + processNumber
+  const port = (Number(process.env.PORT) || 2569) + processNumber
   gameOptions = {
-    presence: new RedisPresence(process.env.REDIS_URI),
+    presence: new RedisPresence(
+      process.env.REDIS_URI
+    ) as Presence /* TODO: type assertion shouldnt be required, need to report that bug to colyseus */,
     driver: new RedisDriver(process.env.REDIS_URI),
     publicAddress: `${port}.${process.env.SERVER_NAME}`,
     selectProcessIdToCreateRoom: async function (
@@ -63,15 +80,36 @@ if (process.env.NODE_APP_INSTANCE) {
           throw "Attempt to create one lobby"
         }
       }
-      return (await matchMaker.stats.fetchAll()).sort((p1, p2) =>
-        p1.ccu > p2.ccu ? 1 : -1
-      )[0].processId
+      const stats = await matchMaker.stats.fetchAll()
+      stats.sort((p1, p2) =>
+        p1.roomCount !== p2.roomCount
+          ? p1.roomCount - p2.roomCount
+          : p1.ccu - p2.ccu
+      )
+      if (stats.length === 0) {
+        throw "No process available"
+      } else {
+        return stats[0]?.processId
+      }
     }
   }
+  gameOptions.presence?.setMaxListeners(100) // extend max listeners to avoid memory leak warning
+}
+
+if (process.env.MODE === "dev") {
+  gameOptions.devMode = true
 }
 
 export default config({
   options: gameOptions,
+
+  // uWebSockets caused many issues unfortunately, reverting to WebSocketTransport for now
+  /*initializeTransport: function () {
+    return new uWebSocketsTransport({
+      compression: uWebSockets.SHARED_COMPRESSOR
+    })
+  },*/
+
   initializeGameServer: (gameServer) => {
     /**
      * Define your room handlers:
@@ -87,6 +125,47 @@ export default config({
      * Bind your custom express routes here:
      * Read more: https://expressjs.com/en/starter/basic-routing.html
      */
+
+    app.use(
+      helmet({
+        crossOriginOpenerPolicy: false, // required for firebase auth
+        contentSecurityPolicy: {
+          directives: {
+            defaultSrc: [
+              "'self'",
+              "https://*.pokemon-auto-chess.com",
+              "wss://*.pokemon-auto-chess.com",
+              "https://*.firebaseapp.com",
+              "https://apis.google.com",
+              "https://*.googleapis.com",
+              "https://*.githubusercontent.com",
+              "http://raw.githubusercontent.com",
+              "https://*.youtube.com",
+              "https://pokemon.darkatek7.com",
+              "https://eternara.site",
+              "https://www.penumbra-autochess.com",
+              "https://pokechess.com.br",
+              "https://uruwhy.online",
+              "https://koala-pac.com"
+            ],
+            scriptSrc: [
+              "'self'",
+              "'unsafe-inline'",
+              "'unsafe-eval'",
+              "https://apis.google.com",
+              "https://*.googleapis.com"
+            ],
+            imgSrc: [
+              "'self'",
+              "data:",
+              "blob:",
+              "https://www.gstatic.com",
+              "http://raw.githubusercontent.com"
+            ]
+          }
+        }
+      })
+    )
 
     app.use(((err, req, res, next) => {
       res.status(err.status).json(err)
@@ -136,6 +215,10 @@ export default config({
       res.sendFile(viewsSrc)
     })
 
+    app.get("/gameboy", (req, res) => {
+      res.sendFile(viewsSrc)
+    })
+
     app.get("/pokemons", (req, res) => {
       res.send(Pkm)
     })
@@ -157,6 +240,7 @@ export default config({
     })
 
     app.get("/meta", async (req, res) => {
+      res.set("Cache-Control", "no-cache")
       res.send(
         await Meta.find({}, [
           "cluster_id",
@@ -173,15 +257,25 @@ export default config({
     })
 
     app.get("/titles", async (req, res) => {
-      res.send(await TitleStatistic.find())
+      res.send(await TitleStatistic.find().sort({ name: 1 }).exec()) // Ensure a consistent order by sorting on a unique field
+    })
+
+    app.get("/meta/metadata", async (req, res) => {
+      // Set Cache-Control header for 24 hours (86400 seconds)
+      res.set("Cache-Control", "max-age=86400")
+      res.send(getMetadata())
     })
 
     app.get("/meta/items", async (req, res) => {
-      res.send(await ItemsStatistics.find())
+      // Set Cache-Control header for 24 hours (86400 seconds)
+      res.set("Cache-Control", "max-age=86400")
+      res.send(getMetaItems())
     })
 
     app.get("/meta/pokemons", async (req, res) => {
-      res.send(await PokemonsStatistics.find())
+      // Set Cache-Control header for 24 hours (86400 seconds)
+      res.set("Cache-Control", "max-age=86400")
+      res.send(getMetaPokemons())
     })
 
     app.get("/tilemap/:map", async (req, res) => {
@@ -190,10 +284,12 @@ export default config({
     })
 
     app.get("/leaderboards", async (req, res) => {
+      res.set("Cache-Control", "no-cache")
       res.send(getLeaderboard())
     })
 
     app.get("/game-history/:playerUid", async (req, res) => {
+      res.set("Cache-Control", "no-cache")
       const { playerUid } = req.params
       const { page = 1 } = req.query
       const limit = 10
@@ -201,7 +297,7 @@ export default config({
 
       const stats = await DetailledStatistic.find(
         { playerId: playerUid },
-        ["pokemons", "time", "rank", "elo"],
+        ["pokemons", "time", "rank", "elo", "gameMode"],
         { limit: limit, skip: skip, sort: { time: -1 } }
       )
       if (stats) {
@@ -211,7 +307,8 @@ export default config({
               record.time,
               record.rank,
               record.elo,
-              record.pokemons
+              record.pokemons,
+              record.gameMode
             )
         )
 
@@ -223,33 +320,115 @@ export default config({
       return res.status(200).json([])
     })
 
-    app.get("/bots", async (req, res) => {
-      res.send(getBotsList({ withSteps: req.query.withSteps === "true" }))
+    app.get("/chat-history/:playerUid", async (req, res) => {
+      res.set("Cache-Control", "no-cache")
+      const { playerUid } = req.params
+      const { page = 1 } = req.query
+      const limit = 30
+      const skip = (Number(page) - 1) * limit
+      const messages = await chatV2.find({ authorId: playerUid }, undefined, {
+        limit: limit,
+        skip: skip,
+        sort: { time: -1 }
+      })
+      return res.status(200).json(messages ?? [])
     })
 
-    app.post("/bots", async (req, res) => {
-      // get json from body
-      try {
-        const { bot, author } = req.body
-        const pastebinUrl = (await pastebinService.createPaste(
-          `${author} has uploaded BOT ${bot.name}`,
-          JSON.stringify(bot, null, 2)
-        )) as string
-
-        logger.debug(
-          `bot ${bot.name} created by ${author} with pastebin url ${pastebinUrl}`
-        )
-
-        discordService.announceBotCreation(bot, pastebinUrl, author)
-        res.status(201).send(pastebinUrl)
-      } catch (error) {
-        logger.error(error)
-        res.status(500).send("Internal server error")
-      }
+    app.get("/bots", async (req, res) => {
+      const botsData = await getBotsList(
+        req.query.approved === "true"
+          ? true
+          : req.query.approved === "false"
+            ? false
+            : undefined
+      )
+      res.send(botsData)
     })
 
     app.get("/bots/:id", async (req, res) => {
-      res.send(getBotData(req.params.id))
+      res.send(await getBotData(req.params.id))
+    })
+
+    const authUser = async (req, res): Promise<UserRecord | null> => {
+      let user
+      try {
+        //get header Authorization
+        const authHeader = req.headers.authorization
+        if (!authHeader) throw new Error("Unauthorized")
+        const token = authHeader.split(" ")[1]
+        if (!token) throw new Error("Unauthorized")
+        // get user from firebase
+        const decodedToken = await admin.auth().verifyIdToken(token)
+        user = await admin.auth().getUser(decodedToken.uid)
+        if (!user || !user.displayName) throw new Error("Unauthorized")
+        return user
+      } catch (error) {
+        res.status(401).send(error)
+        return null
+      }
+    }
+
+    app.post("/bots", async (req, res) => {
+      try {
+        const userAuth = await authUser(req, res)
+        if (!userAuth) return
+        const user = await UserMetadata.findOne({ uid: userAuth.uid })
+        if (!user) return
+        const bot = req.body
+        bot.author = user.displayName
+        const botAdded = addBotToDatabase(bot)
+        res.status(201).send(botAdded)
+      } catch (error) {
+        logger.error("Error submitting bot", error)
+        res.status(500).send("Error submitting bot")
+      }
+    })
+
+    app.delete("/bots/:id", async (req, res) => {
+      const userAuth = await authUser(req, res)
+      if (!userAuth) return
+      const user = await UserMetadata.findOne({ uid: userAuth.uid })
+      if (
+        !user ||
+        (user.role !== Role.BOT_MANAGER && user.role !== Role.ADMIN)
+      ) {
+        res.status(403).send("Unauthorized")
+        return
+      }
+
+      try {
+        const deleteResult = await deleteBotFromDatabase(req.params.id, user)
+        res.status(deleteResult.deletedCount > 0 ? 200 : 404).send()
+      } catch (error) {
+        logger.error("Error deleting bot", error)
+        res.status(500).send("Error deleting bot")
+      }
+    })
+
+    app.post("/bots/:id/approve", async (req, res) => {
+      const userRecord = await authUser(req, res)
+      if (!userRecord) return
+      const user = await UserMetadata.findOne({ uid: userRecord.uid })
+      if (
+        !user ||
+        (user.role !== Role.BOT_MANAGER && user.role !== Role.ADMIN)
+      ) {
+        res.status(403).send("Unauthorized")
+        return
+      }
+
+      try {
+        const approved = req.body.approved
+        const updateResult = await approveBot(req.params.id, approved, user)
+        if (updateResult.modifiedCount === 0) {
+          res.status(404).send("Bot not found")
+          return
+        }
+        res.status(200).send()
+      } catch (error) {
+        logger.error("Error approving bot", error)
+        res.status(500).send("Error approving bot")
+      }
     })
 
     app.get("/status", async (req, res) => {

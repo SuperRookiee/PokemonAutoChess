@@ -2,7 +2,7 @@ import { t } from "i18next"
 import React, { ReactElement } from "react"
 import { Damage, Stat } from "../../../../types/enum/Game"
 import { Item } from "../../../../types/enum/Item"
-import { Status } from "../../../../types/enum/Status"
+import { PositiveStatuses, Status } from "../../../../types/enum/Status"
 import { Synergy } from "../../../../types/enum/Synergy"
 import { Weather } from "../../../../types/enum/Weather"
 import { roundToNDigits } from "../../../../utils/number"
@@ -30,7 +30,7 @@ export const iconRegExp = new RegExp(
   "g"
 )
 
-export function addIconsToDescription(description: string, stats?: { ap: number, luck: number, stars: number }) {
+export function addIconsToDescription(description: string, stats?: { ap: number, luck: number, stars: number, stages?: number }) {
   const matchIcon = description.match(iconRegExp)
   if (matchIcon === null) return description
   const descriptionParts = description.split(iconRegExp)
@@ -82,7 +82,7 @@ export function addIconsToDescription(description: string, stats?: { ap: number,
             title={t(`status_description.${token}`)}
           >
             <img src={`assets/icons/${token}.svg`} />
-            <span className="status-label">{t(`status.${token}`)}</span>
+            <span className={cc("status-label", { positive: PositiveStatuses.includes(token as Status) })}>{t(`status.${token}`)}</span>
           </span>
         )
       } else if (Weathers.includes(token as Weather)) {
@@ -147,9 +147,9 @@ export function addIconsToDescription(description: string, stats?: { ap: number,
                 title="Scales with Luck"
               ></img>
             )}
-            {array.map((v, j) => {
-              const separator = j < array.length - 1 ? "/" : ""
-              let scaleValue = 1
+            {array.slice(0, stats?.stages).map((v, j) => {
+              const separator = j < Math.min(stats?.stages ?? 4, array.length) - 1 ? "/" : ""
+              let scaleValue = 0
               if (scaleType === "AP") scaleValue = stats?.ap ?? 0
               if (scaleType === "LUCK") scaleValue = stats?.luck ?? 0
               const value = roundToNDigits(Number(v) * (1 + scaleValue * scaleFactor / 100), nbDigits)

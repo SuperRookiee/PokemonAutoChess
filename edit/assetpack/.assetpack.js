@@ -3,7 +3,9 @@ import { compressJpg, compressPng } from "@assetpack/plugin-compress"
 //import { audio } from "@assetpack/plugin-ffmpeg"
 import { json } from "@assetpack/plugin-json"
 import fs from "fs-extra"
-import { texturePacker } from "./plugin-texturepacker-fork/dist/es/index.js"
+import { texturePacker } from "./plugin-texture-packer-fork/dist/es/index.js"
+
+const pkg = fs.readJSONSync("../../package.json")
 
 export default {
   entry: "../../app/public/src/assets",
@@ -42,10 +44,15 @@ export default {
       },
       resolutionOptions: {
         resolutions: { default: 1 },
-        template: "" // prevent adding @1x suffix when not generating multiple resolutions
+        template: `-${pkg.version}`
       }
     }),
-    texturePackIndexer: texturePackAtlas()
+    texturePackIndexer: texturePackAtlas(),
+    compressedAtlas: compressedAtlas({
+      path: "../../app/public/src/assets/pokemons",
+      include: /\d+-?\d+/,
+      outputPath: "../../app/public/dist/client/assets/pokemons.json"
+    })
   }
 }
 
@@ -60,7 +67,6 @@ function texturePackAtlas() {
         ? fs.readJSONSync(atlasPath)
         : null
 
-      const pkg = fs.readJSONSync("../../package.json")
       const previousVersion = existingAtlas?.version
         ? Number(existingAtlas.version.split(".").pop())
         : 0
@@ -83,8 +89,7 @@ function texturePackAtlas() {
 
           if (packPath in atlas.packs === false) {
             atlas.packs[packPath] = {
-              name: packName,
-              path: `${packPath}-${pkg.version.replaceAll(".", "_")}.json`
+              name: packName
             }
           }
 
@@ -114,28 +119,6 @@ function texturePackAtlas() {
       }
       walk(tree)
 
-      for (const packName in atlas.packs) {
-        console.log(
-          `Renaming ${packName} pack to ${packName}-${pkg.version.replaceAll(".", "_")}.json`
-        )
-        const newName = `${packName}-${pkg.version.replaceAll(".", "_")}`
-        fs.moveSync(
-          `../../app/public/dist/client/assets/${packName}/${packName}.png`,
-          `../../app/public/dist/client/assets/${packName}/${newName}.png`
-        )
-        const json = fs.readJSONSync(
-          `../../app/public/dist/client/assets/${packName}/${packName}.json`
-        )
-        json.textures[0].image = `${newName}.png`
-        fs.writeJSONSync(
-          `../../app/public/dist/client/assets/${packName}/${newName}.json`,
-          json
-        )
-        fs.removeSync(
-          `../../app/public/dist/client/assets/${packName}/${packName}.json`
-        )
-      }
-
       //fs.writeJSONSync("tree.json", tree)
       fs.writeJSONSync(atlasPath, atlas)
 
@@ -151,6 +134,58 @@ function texturePackAtlas() {
         "../../app/public/dist/client/assets/item",
         { recursive: true }
       )
+    }
+  }
+}
+
+function compressedAtlas({ path, include, outputPath }) {
+  return {
+    name: "compressed-atlas",
+    finish() {
+      const files = fs.readdirSync(path)
+      const jsonFiles = files.filter(
+        (file) => file.endsWith(".json") && include.test(file)
+      )
+      const compressedPokemonsAtlas = {}
+      console.log(
+        `Compressing ${jsonFiles.length} JSON files into compressed atlas ${outputPath}`
+      )
+      for (const jsonFile of jsonFiles) {
+        const filePath = `${path}/${jsonFile}`
+        const jsonData = fs.readJSONSync(filePath)
+        // Process the jsonData as needed
+        const { frames, size, scale, image } = jsonData.textures[0]
+        compressedPokemonsAtlas[image] = {
+          s: [size.w, size.h, size.scale], // width, height, scale
+          a: {}
+        }
+
+        for (const frame of frames) {
+          const parts = frame.filename.split("/")
+          let node = compressedPokemonsAtlas[image].a
+          while (parts.length > 1) {
+            const part = parts.shift()
+            if (!(part in node)) {
+              node[part] = {}
+            }
+            node = node[part]
+          }
+          node[parts[0]] = [
+            frame.sourceSize.w,
+            frame.sourceSize.h,
+            frame.spriteSourceSize.x,
+            frame.spriteSourceSize.y,
+            frame.spriteSourceSize.w,
+            frame.spriteSourceSize.h,
+            frame.frame.x,
+            frame.frame.y,
+            frame.frame.w,
+            frame.frame.h
+          ]
+        }
+      }
+
+      fs.writeJSONSync(outputPath, compressedPokemonsAtlas)
     }
   }
 }

@@ -20,7 +20,7 @@ export default class ExperienceManager
     this.maxLevel = 9
   }
 
-  canLevel() {
+  canLevelUp() {
     return this.level < this.maxLevel
   }
 
@@ -47,10 +47,6 @@ export default class ExperienceManager
 }
 
 export function getLevelUpCost(specialGameRule?: SpecialGameRule | null) {
-  let cost = 4
-  if (specialGameRule === SpecialGameRule.RARE_IS_EXPENSIVE) {
-    cost = 8
-  }
-
+  const cost = 4
   return cost
 }

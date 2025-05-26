@@ -73,6 +73,7 @@ export function SpriteDebug() {
             <option value="Idle">Idle</option>
             <option value="Walk">Walk</option>
             <option value="Sleep">Sleep</option>
+            <option value="Eat">Eat</option>
             <option value="Hurt">Hurt</option>
             <option value="Hop">Hop</option>
             <option value="Attack">Attack</option>
@@ -92,6 +93,12 @@ export function SpriteDebug() {
                 {k}
               </option>
             ))}
+            <option value="BOOST/ATK">BOOST ATTACK</option>
+            <option value="BOOST/DEF">BOOST DEFENSE</option>
+            <option value="BOOST/SPE_DEF">BOOST SPE_DEF</option>
+            <option value="BOOST/SHIELD">BOOST SHIELD</option>
+            <option value="BOOST/SPEED">BOOST SPEED</option>
+            <option value="BOOST/AP">BOOST AP</option>
           </select>
         </div>
         <div className="sprite-viewer-sprite">

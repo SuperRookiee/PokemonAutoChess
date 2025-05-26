@@ -2,18 +2,28 @@ import { DesignTiled } from "../../../../core/design"
 import PokemonFactory from "../../../../models/pokemon-factory"
 import { AnimationType } from "../../../../types/Animation"
 import { DungeonDetails, DungeonPMDO } from "../../../../types/enum/Dungeon"
-import { Orientation } from "../../../../types/enum/Game"
+import { Orientation, Stat } from "../../../../types/enum/Game"
 import { AnimationConfig, Pkm } from "../../../../types/enum/Pokemon"
 import { Status } from "../../../../types/enum/Status"
 import { logger } from "../../../../utils/logger"
 import { max } from "../../../../utils/number"
 import { OrientationVector } from "../../../../utils/orientation"
 import { playMusic, preloadMusic } from "../../pages/utils/audio"
-import { transformAttackCoordinate } from "../../pages/utils/utils"
+import { transformEntityCoordinates } from "../../pages/utils/utils"
 import AnimationManager from "../animation-manager"
 import { displayAbility } from "../components/abilities-animations"
+import { displayBoost } from "../components/boosts-animations"
 import LoadingManager from "../components/loading-manager"
 import PokemonSprite from "../components/pokemon"
+import { DEPTH } from "../depths"
+
+type Boost =
+  | "BOOST/ATK"
+  | "BOOST/AP"
+  | "BOOST/DEF"
+  | "BOOST/SPE_DEF"
+  | "BOOST/SHIELD"
+  | "BOOST/SPEED"
 
 export class DebugScene extends Phaser.Scene {
   height: number
@@ -27,6 +37,7 @@ export class DebugScene extends Phaser.Scene {
   uid = "debug"
   tilemap: DesignTiled | undefined
   map: Phaser.Tilemaps.Tilemap | undefined
+  colorFilter: Phaser.GameObjects.Rectangle | null = null
   music: Phaser.Sound.WebAudioSound | null = null
   attackAnimInterval: ReturnType<typeof setInterval> | undefined
 
@@ -71,12 +82,12 @@ export class DebugScene extends Phaser.Scene {
       this.target.destroy()
       clearInterval(this.attackAnimInterval)
     }
-    const [px, py] = transformAttackCoordinate(3, 3, false)
+    const [px, py] = transformEntityCoordinates(3, 3, false)
     this.pokemon = new PokemonSprite(
       this,
       px,
       py,
-      PokemonFactory.createPokemonFromName(pkm, { selectedShiny: shiny }),
+      PokemonFactory.createPokemonFromName(pkm, { shiny }),
       "debug",
       false,
       false
@@ -98,6 +109,18 @@ export class DebugScene extends Phaser.Scene {
     if (animationType === "Emote") {
       animationName = AnimationConfig[pkm].emote
     }
+    if (animationType === "Hop") {
+      animationName = AnimationConfig[pkm].hop ?? AnimationType.Hop
+    }
+    if (animationType === "Hurt") {
+      animationName = AnimationConfig[pkm].hurt ?? AnimationType.Hurt
+    }
+    if (animationType === "Sleep") {
+      animationName = AnimationConfig[pkm].sleep ?? AnimationType.Sleep
+    }
+    if (animationType === "Eat") {
+      animationName = AnimationConfig[pkm].eat ?? AnimationType.Eat
+    }
 
     try {
       this.animationManager?.play(this.pokemon, animationName, { repeat: -1 })
@@ -110,8 +133,27 @@ export class DebugScene extends Phaser.Scene {
     this.applyStatusAnimation(status)
   }
 
-  updateMap(mapName: DungeonPMDO): Promise<void> {
+  updateMap(mapName: DungeonPMDO | "town"): Promise<void> {
     if (this.map) this.map.destroy()
+
+    if (mapName === "town") {
+      return new Promise((resolve) => {
+        this.map = this.add.tilemap("town")
+        const tileset = this.map.addTilesetImage(
+          "town_tileset",
+          "town_tileset"
+        )!
+        this.map.createLayer("layer0", tileset, 0, 0)?.setScale(2, 2)
+        this.map.createLayer("layer1", tileset, 0, 0)?.setScale(2, 2)
+        this.map.createLayer("layer2", tileset, 0, 0)?.setScale(2, 2)
+        const sys = this.sys as any
+        if (sys.animatedTiles) {
+          sys.animatedTiles.pause()
+        }
+        playMusic(this as any, DungeonDetails[mapName].music)
+        resolve()
+      })
+    }
 
     return fetch(`/tilemap/${mapName}`)
       .then((res) => res.json())
@@ -126,14 +168,14 @@ export class DebugScene extends Phaser.Scene {
               "/assets/tilesets/" + mapName + "/" + t.image
             )
           })
-          this.load.tilemapTiledJSON("map", tilemap)
+          this.load.tilemapTiledJSON(mapName, tilemap)
           preloadMusic(this, DungeonDetails[mapName].music)
           this.load.once("complete", resolve)
           this.load.start()
         })
       })
       .then(() => {
-        const map = this.make.tilemap({ key: "map" })
+        const map = this.make.tilemap({ key: mapName })
         this.map = map
         this.tilemap!.layers.forEach((layer) => {
           const tileset = map.addTilesetImage(
@@ -147,7 +189,32 @@ export class DebugScene extends Phaser.Scene {
       })
   }
 
-  applyStatusAnimation(status: Status | "") {
+  updateColorFilter({
+    red,
+    green,
+    blue,
+    alpha
+  }: {
+    red: number
+    green: number
+    blue: number
+    alpha: number
+  }) {
+    this.colorFilter?.destroy()
+    this.colorFilter = this.add.existing(
+      new Phaser.GameObjects.Rectangle(
+        this,
+        1500,
+        1000,
+        3000,
+        2000,
+        new Phaser.Display.Color(red, green, blue).color,
+        alpha / 100
+      ).setDepth(DEPTH.WEATHER_FX)
+    )
+  }
+
+  applyStatusAnimation(status: Status | Boost | "") {
     if (this.pokemon) {
       this.pokemon.sprite.setTint(0xffffff)
       this.pokemon.removePoison()
@@ -163,6 +230,7 @@ export class DebugScene extends Phaser.Scene {
       this.pokemon.removeParalysis()
       this.pokemon.removePokerus()
       this.pokemon.removeLocked()
+      this.pokemon.removeBlinded()
       this.pokemon.removeArmorReduction()
       this.pokemon.removeCharm()
       this.pokemon.removeRuneProtect()
@@ -214,7 +282,7 @@ export class DebugScene extends Phaser.Scene {
       if (status == Status.POKERUS) {
         this.pokemon.addPokerus()
       }
-      if (status == Status.ARMOR_REDUCTION) {
+      if (status == Status.ARMOR_BREAK) {
         this.pokemon.addArmorReduction()
       }
       if (status == Status.CHARM) {
@@ -235,7 +303,10 @@ export class DebugScene extends Phaser.Scene {
       if (status == Status.LOCKED) {
         this.pokemon.addLocked()
       }
-      if (status == Status.SPIKE_ARMOR) {
+      if (status == Status.BLINDED) {
+        this.pokemon.addBlinded()
+      }
+      if (status == Status.SPIKY_SHIELD) {
         this.pokemon.addSpikeArmor()
       }
       if (status == Status.MAGIC_BOUNCE) {
@@ -253,6 +324,25 @@ export class DebugScene extends Phaser.Scene {
       if (status == Status.FAIRY_FIELD) {
         this.pokemon.addFairyField()
       }
+
+      if (status === "BOOST/ATK") {
+        this.displayBoost(Stat.ATK)
+      }
+      if (status === "BOOST/AP") {
+        this.displayBoost(Stat.AP)
+      }
+      if (status === "BOOST/DEF") {
+        this.displayBoost(Stat.DEF)
+      }
+      if (status === "BOOST/SPE_DEF") {
+        this.displayBoost(Stat.SPE_DEF)
+      }
+      if (status === "BOOST/SHIELD") {
+        this.displayBoost(Stat.SHIELD)
+      }
+      if (status === "BOOST/SPEED") {
+        this.displayBoost(Stat.SPEED)
+      }
     }
   }
 
@@ -263,7 +353,7 @@ export class DebugScene extends Phaser.Scene {
     const ty = this.pokemon!.positionY + OrientationVector[or][1] * range
     this.pokemon!.targetX = tx
     this.pokemon!.targetY = ty
-    const [rtx, rty] = transformAttackCoordinate(tx, ty, false)
+    const [rtx, rty] = transformEntityCoordinates(tx, ty, false)
     this.target = new PokemonSprite(
       this,
       rtx,
@@ -305,5 +395,14 @@ export class DebugScene extends Phaser.Scene {
     }
     showAbilityAnim()
     this.attackAnimInterval = setInterval(showAbilityAnim, 2000)
+  }
+
+  displayBoost(stat: Stat) {
+    const coords = transformEntityCoordinates(
+      this.pokemon!.positionX,
+      this.pokemon!.positionY,
+      false
+    )
+    displayBoost(this, coords[0], coords[1], stat)
   }
 }

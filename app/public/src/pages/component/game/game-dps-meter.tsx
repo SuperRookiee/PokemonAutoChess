@@ -1,13 +1,14 @@
-import React, { useState } from "react"
+import React from "react"
 import { useTranslation } from "react-i18next"
 import { Tab, TabList, TabPanel, Tabs } from "react-tabs"
 import { selectCurrentPlayer, useAppSelector } from "../../../hooks"
-import { preferences, savePreferences } from "../../../preferences"
-import { getAvatarSrc } from "../../../utils"
+import { usePreference } from "../../../preferences"
 import GamePlayerDpsMeter from "./game-player-dps-meter"
 import GamePlayerDpsTakenMeter from "./game-player-dps-taken-meter"
 import GamePlayerHpsMeter from "./game-player-hps-meter"
-import { Team } from "../../../../../types/enum/Game"
+import { GamePhaseState, Team } from "../../../../../types/enum/Game"
+import { PVEStages } from "../../../../../models/pve-stages"
+import PokemonPortrait from "../pokemon-portrait"
 import "./game-dps-meter.css"
 
 export default function GameDpsMeter() {
@@ -16,14 +17,19 @@ export default function GameDpsMeter() {
   const team = useAppSelector(
     (state) => state.game.currentTeam
   )
+  const stageLevel = useAppSelector((state) => state.game.stageLevel)
+  const phase = useAppSelector((state) => state.game.phase)
+
   const blueDpsMeter = useAppSelector((state) => state.game.blueDpsMeter)
   const redDpsMeter = useAppSelector((state) => state.game.redDpsMeter)
   const myDpsMeter = team === Team.BLUE_TEAM ? blueDpsMeter : redDpsMeter
   const opponentDpsMeter = team === Team.BLUE_TEAM ? redDpsMeter : blueDpsMeter
 
-  const [isOpen, setOpen] = useState(preferences.showDpsMeter)
+  const [isOpen, setOpen] = usePreference("showDpsMeter")
 
   if (!currentPlayer) return null
+
+  const isPVE = phase === GamePhaseState.FIGHT ? stageLevel in PVEStages : (stageLevel - 1) in PVEStages
 
   const name = currentPlayer.name
   const avatar = currentPlayer.avatar
@@ -32,7 +38,6 @@ export default function GameDpsMeter() {
 
   function toggleOpen() {
     setOpen(!isOpen)
-    savePreferences({ showDpsMeter: !isOpen })
   }
 
   if (opponentAvatar == "") {
@@ -54,16 +59,13 @@ export default function GameDpsMeter() {
       >
         <header>
           <div>
-            <img src={getAvatarSrc(avatar)} className="pokemon-portrait"></img>
+            <PokemonPortrait avatar={avatar} />
             <p>{name}</p>
           </div>
-          <h2>Vs</h2>
+          <h2>vs</h2>
           <div>
-            <img
-              src={getAvatarSrc(opponentAvatar)}
-              className="pokemon-portrait"
-            ></img>
-            <p>{t(opponentName)}</p>
+            <PokemonPortrait avatar={opponentAvatar} />
+            <p>{isPVE ? t(opponentName) : opponentName}</p>
           </div>
         </header>
         <Tabs>

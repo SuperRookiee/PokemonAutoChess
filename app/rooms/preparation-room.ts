@@ -1,10 +1,9 @@
 import { Dispatcher } from "@colyseus/command"
-import { Client, Room, updateLobby } from "colyseus"
+import { Client, ClientArray, Room, updateLobby } from "colyseus"
 import admin from "firebase-admin"
-import BannedUser from "../models/mongo-models/banned-user"
 import { IBot } from "../models/mongo-models/bot-v2"
 import UserMetadata from "../models/mongo-models/user-metadata"
-import { IPreparationMetadata, Transfer } from "../types"
+import { IPreparationMetadata, Role, Transfer } from "../types"
 import { EloRank, MAX_PLAYERS_PER_GAME } from "../types/Config"
 import { CloseCodes } from "../types/enum/CloseCodes"
 import { BotDifficulty, GameMode } from "../types/enum/Game"
@@ -12,7 +11,6 @@ import { logger } from "../utils/logger"
 import { values } from "../utils/schemas"
 import {
   OnAddBotCommand,
-  OnDeleteRoomCommand,
   OnGameStartRequestCommand,
   OnJoinCommand,
   OnKickPlayerCommand,
@@ -20,16 +18,19 @@ import {
   OnNewMessageCommand,
   OnRemoveBotCommand,
   OnRoomChangeRankCommand,
+  OnRoomChangeSpecialRule,
   OnRoomNameCommand,
   OnRoomPasswordCommand,
-  OnToggleEloCommand,
+  OnChangeNoEloCommand,
   OnToggleReadyCommand,
   RemoveMessageCommand
 } from "./commands/preparation-commands"
 import PreparationState from "./states/preparation-state"
+import { UserRecord } from "firebase-admin/lib/auth/user-record"
 
 export default class PreparationRoom extends Room<PreparationState> {
   dispatcher: Dispatcher<this>
+  clients!: ClientArray<undefined, UserRecord>
 
   constructor() {
     super()
@@ -53,10 +54,8 @@ export default class PreparationRoom extends Room<PreparationState> {
     updateLobby(this)
   }
 
-  async toggleElo(noElo: boolean) {
-    await this.setMetadata(<IPreparationMetadata>{
-      noElo: noElo
-    })
+  async setNoElo(noElo: boolean) {
+    await this.setMetadata(<IPreparationMetadata>{ noElo })
     updateLobby(this)
   }
 
@@ -94,7 +93,7 @@ export default class PreparationRoom extends Room<PreparationState> {
     this.clock.start()
 
     // logger.debug(defaultRoomName);
-    this.setState(new PreparationState(options))
+    this.state = new PreparationState(options)
     this.setMetadata(<IPreparationMetadata>{
       name: options.roomName.slice(0, 30),
       ownerName:
@@ -119,7 +118,14 @@ export default class PreparationRoom extends Room<PreparationState> {
 
     if (options.autoStartDelayInSeconds) {
       this.clock.setTimeout(() => {
-        if (this.state.users.size < 2) {
+        if (this.state.gameStartedAt != null) {
+          // game has started but the prep room is still open
+          logger.debug(
+            "game has started but the prep room is still open, forcing close"
+          )
+          this.disconnect(CloseCodes.NORMAL_CLOSURE)
+          return
+        } else if (this.state.users.size < 2) {
           // automatically remove lobbies with zero or one players
           if (this.metadata?.tournamentId) {
             // automatically give rank 1 if solo in a tournament lobby
@@ -186,15 +192,6 @@ export default class PreparationRoom extends Room<PreparationState> {
       }
     })
 
-    this.onMessage(Transfer.DELETE_ROOM, (client) => {
-      logger.info(Transfer.DELETE_ROOM, this.roomName)
-      try {
-        this.dispatcher.dispatch(new OnDeleteRoomCommand(), { client })
-      } catch (error) {
-        logger.error(error)
-      }
-    })
-
     this.onMessage(Transfer.CHANGE_ROOM_NAME, (client, message) => {
       logger.info(Transfer.CHANGE_ROOM_NAME, this.roomName)
       try {
@@ -232,10 +229,25 @@ export default class PreparationRoom extends Room<PreparationState> {
       }
     )
 
-    this.onMessage(Transfer.TOGGLE_NO_ELO, (client, message) => {
-      logger.info(Transfer.TOGGLE_NO_ELO, this.roomName)
+    this.onMessage(Transfer.CHANGE_SPECIAL_RULE, (client, specialRule) => {
+      logger.info(Transfer.CHANGE_SPECIAL_RULE, this.roomName, specialRule)
       try {
-        this.dispatcher.dispatch(new OnToggleEloCommand(), { client, message })
+        this.dispatcher.dispatch(new OnRoomChangeSpecialRule(), {
+          client,
+          specialRule
+        })
+      } catch (error) {
+        logger.error(error)
+      }
+    })
+
+    this.onMessage(Transfer.CHANGE_NO_ELO, (client, message) => {
+      logger.info(Transfer.CHANGE_NO_ELO, this.roomName)
+      try {
+        this.dispatcher.dispatch(new OnChangeNoEloCommand(), {
+          client,
+          message
+        })
       } catch (error) {
         logger.error(error)
       }
@@ -250,7 +262,7 @@ export default class PreparationRoom extends Room<PreparationState> {
       }
     })
 
-    this.onMessage(Transfer.TOGGLE_READY, (client, ready?: boolean) => {
+    this.onMessage(Transfer.TOGGLE_READY, (client, ready: boolean) => {
       logger.info(Transfer.TOGGLE_READY, this.roomName)
       try {
         this.dispatcher.dispatch(new OnToggleReadyCommand(), { client, ready })
@@ -317,31 +329,34 @@ export default class PreparationRoom extends Room<PreparationState> {
 
     this.onServerAnnouncement = this.onServerAnnouncement.bind(this)
     this.presence.subscribe("server-announcement", this.onServerAnnouncement)
-
     this.onGameStart = this.onGameStart.bind(this)
     this.presence.subscribe("game-started", this.onGameStart)
+    this.onRoomDeleted = this.onRoomDeleted.bind(this)
+    this.presence.subscribe("room-deleted", this.onRoomDeleted)
   }
 
-  async onAuth(client: Client, options: any, request: any) {
+  async onAuth(client: Client, options, context) {
     try {
-      super.onAuth(client, options, request)
       const token = await admin.auth().verifyIdToken(options.idToken)
       const user = await admin.auth().getUser(token.uid)
-      const isBanned = await BannedUser.findOne({ uid: user.uid })
       const userProfile = await UserMetadata.findOne({ uid: user.uid })
+      const isAdmin = userProfile?.role === Role.ADMIN
       client.send(Transfer.USER_PROFILE, userProfile)
 
       const isAlreadyInRoom = this.state.users.has(user.uid)
       const numberOfHumanPlayers = values(this.state.users).filter(
         (u) => !u.isBot
       ).length
-      if (numberOfHumanPlayers >= MAX_PLAYERS_PER_GAME && !isAlreadyInRoom) {
+
+      if (numberOfHumanPlayers >= MAX_PLAYERS_PER_GAME && !isAdmin) {
         throw "Room is full"
+      } else if (isAlreadyInRoom) {
+        throw "Already joined"
       } else if (this.state.gameStartedAt != null) {
         throw "Game already started"
       } else if (!user.displayName) {
         throw "No display name"
-      } else if (isBanned) {
+      } else if (userProfile?.banned) {
         throw "User banned"
       } else if (this.metadata.blacklist.includes(user.uid)) {
         throw "User previously kicked"
@@ -353,29 +368,38 @@ export default class PreparationRoom extends Room<PreparationState> {
     }
   }
 
-  onJoin(client: Client, options: any, auth: any) {
-    if (client && client.auth && client.auth.displayName) {
+  async onJoin(
+    client: Client<undefined, UserRecord>,
+    options: any,
+    auth: UserRecord | undefined
+  ) {
+    if (auth) {
       /*logger.info(
-        `${client.auth.displayName} ${client.id} join preparation room`
+        `${auth.displayName} ${client.id} join preparation room`
       )*/
-      this.dispatcher.dispatch(new OnJoinCommand(), { client, options, auth })
+      await this.dispatcher.dispatch(new OnJoinCommand(), {
+        client,
+        options,
+        auth
+      })
     }
   }
 
   async onLeave(client: Client, consented: boolean) {
-    if (client && client.auth && client.auth.displayName) {
+    if (client.auth && client.auth.displayName) {
       /*logger.info(
         `${client.auth.displayName} ${client.id} is leaving preparation room`
       )*/
     }
     try {
+      this.state.abortOnPlayerLeave?.abort()
       if (consented) {
         throw new Error("consented leave")
       }
       // allow disconnected client to reconnect into this room until 10 seconds
       await this.allowReconnection(client, 10)
     } catch (e) {
-      if (client && client.auth && client.auth.displayName) {
+      if (client.auth && client.auth.displayName) {
         /*logger.info(
           `${client.auth.displayName} ${client.id} leave preparation room`
         )*/
@@ -389,6 +413,7 @@ export default class PreparationRoom extends Room<PreparationState> {
     this.dispatcher.stop()
     this.presence.unsubscribe("server-announcement", this.onServerAnnouncement)
     this.presence.unsubscribe("game-started", this.onGameStart)
+    this.presence.unsubscribe("room-deleted", this.onRoomDeleted)
   }
 
   onServerAnnouncement(message: string) {
@@ -409,6 +434,12 @@ export default class PreparationRoom extends Room<PreparationState> {
       this.setGameStarted(new Date().toISOString())
       //logger.debug("game start", game.roomId)
       this.broadcast(Transfer.GAME_START, gameId)
+    }
+  }
+
+  onRoomDeleted(roomId) {
+    if (this.roomId === roomId) {
+      this.disconnect(CloseCodes.ROOM_DELETED)
     }
   }
 

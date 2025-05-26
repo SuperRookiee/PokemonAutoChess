@@ -1,11 +1,11 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { Role } from "../../../../../types"
-import { getAvatarSrc } from "../../../utils"
 import { EloBadge } from "./elo-badge"
 import { RoleBadge } from "./role-badge"
-
+import PokemonPortrait from "../pokemon-portrait"
 import "./avatar.css"
+
 
 export function Avatar(props: {
   name: string
@@ -18,7 +18,7 @@ export function Avatar(props: {
 
   return (
     <div className="avatar player my-box">
-      <img className="pokemon-portrait" src={getAvatarSrc(props.avatar)} />
+      <PokemonPortrait avatar={props.avatar} />
       <div className="player-portrait">
         <span className="player-title-role">
           {props.title && (

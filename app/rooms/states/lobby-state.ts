@@ -20,8 +20,9 @@ export default class LobbyState extends Schema {
     const id = nanoid()
     const time = Date.now()
     const message = new Message(id, payload, authorId, author, avatar, time)
-    chatV2
-      .create({
+    this.messages.push(message)
+    if (author) {
+      chatV2.create({
         id: id,
         payload: payload,
         authorId: authorId,
@@ -29,9 +30,7 @@ export default class LobbyState extends Schema {
         avatar: avatar,
         time: time
       })
-      .then(() => {
-        this.messages.push(message)
-      })
+    }
   }
 
   removeMessage(id: string) {
@@ -47,7 +46,7 @@ export default class LobbyState extends Schema {
   removeMessages(authorId: string) {
     let i = this.messages.length
     while (i--) {
-      if (this.messages[i].authorId === authorId) {
+      if (this.messages[i]?.authorId === authorId) {
         this.messages.splice(i, 1)
       }
     }

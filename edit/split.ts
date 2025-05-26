@@ -191,7 +191,10 @@ async function splitIndex(index: string) {
   const pathIndex = index.replace("-", "/")
   const shinyPad =
     pathIndex.length == 4 ? `${pathIndex}/0000/0001` : `${pathIndex}/0001`
-  const allPads = [pathIndex, shinyPad]
+  const conf =
+    AnimationConfig[mapName.get(index) as Pkm] ?? AnimationConfig[Pkm.DEFAULT]
+  const allPads = [pathIndex]
+  if (!conf.shinyUnavailable) allPads.push(shinyPad)
 
   for (let j = 0; j < allPads.length; j++) {
     const pad = allPads[j]
@@ -202,129 +205,136 @@ async function splitIndex(index: string) {
       )
       const parser = new XMLParser()
       const xmlData = <IPMDCollab>parser.parse(xmlFile)
-      const attackMetadata = xmlData.AnimData.Anims.Anim.find(
-        (m) => m.Name === AnimationConfig[mapName.get(index) as Pkm].attack
+      let attackMetadata = xmlData.AnimData.Anims.Anim.find(
+        (m) => m.Name === conf.attack
       )
       if (attackMetadata) {
-        const attackDurations: number[] =
-          attackMetadata.Durations.Duration.length !== undefined
-            ? [...attackMetadata.Durations.Duration]
-            : [attackMetadata.Durations.Duration]
-        delays[index] = {
-          d: attackDurations
-            .slice(0, attackMetadata.HitFrame)
-            .reduce((prev, curr) => prev + curr, 0),
-          t: attackDurations.reduce((prev, curr) => prev + curr, 0)
+        if (attackMetadata && attackMetadata.CopyOf) {
+          attackMetadata =
+            xmlData.AnimData.Anims.Anim.find(
+              (m) => m.Name == attackMetadata?.CopyOf
+            ) ?? attackMetadata
+        }
+
+        if (!attackMetadata?.Durations?.Duration) {
+          logger.error("no duration found for attack metadata", attackMetadata)
+        } else {
+          const attackDurations: number[] =
+            attackMetadata.Durations.Duration.length !== undefined
+              ? [...attackMetadata.Durations.Duration]
+              : [attackMetadata.Durations.Duration]
+          delays[index] = {
+            d: attackDurations
+              .slice(0, attackMetadata.HitFrame)
+              .reduce((prev, curr) => prev + curr, 0),
+            t: attackDurations.reduce((prev, curr) => prev + curr, 0)
+          }
         }
       }
       for (let k = 0; k < Object.values(SpriteType).length; k++) {
         const anim = Object.values(SpriteType)[k]
-        const conf = mapName.get(index)
 
-        const actions: AnimationType[] = [
+        const actions: Set<AnimationType> = new Set([
           AnimationType.Idle,
-          AnimationType.Walk,
-          AnimationType.Sleep,
-          AnimationType.Hop,
-          AnimationType.Hurt
-        ]
+          AnimationType.Walk
+        ])
 
-        if (conf && AnimationConfig[conf]) {
-          if (!actions.includes(AnimationConfig[conf as Pkm].attack)) {
-            actions.push(AnimationConfig[conf as Pkm].attack)
-          }
-          if (!actions.includes(AnimationConfig[conf as Pkm].ability)) {
-            actions.push(AnimationConfig[conf as Pkm].ability)
-          }
-          if (!actions.includes(AnimationConfig[conf as Pkm].emote)) {
-            actions.push(AnimationConfig[conf as Pkm].emote)
-          }
-        } else {
-          actions.push(AnimationType.Attack)
+        if (!conf) {
+          logger.warn(
+            "Animation config not found for index",
+            index,
+            mapName.get(index)
+          )
+          continue
         }
 
-        for (let l = 0; l < actions.length; l++) {
-          const action = actions[l]
-          try {
-            let metadata = xmlData.AnimData.Anims.Anim.find(
-              (m) => m.Name == action
-            )
-            const img =
-              metadata && metadata.CopyOf
-                ? await Jimp.read(
-                    expandHomeDir(
-                      `${path}/sprite/${pad}/${metadata.CopyOf}-${anim}.png`
-                    )
-                  )
-                : await Jimp.read(
-                    expandHomeDir(`${path}/sprite/${pad}/${action}-${anim}.png`)
-                  )
+        actions.add(conf.sleep ?? AnimationType.Sleep)
+        actions.add(conf.eat ?? AnimationType.Eat)
+        actions.add(conf.hop ?? AnimationType.Hop)
+        actions.add(conf.hurt ?? AnimationType.Hurt)
+        actions.add(conf.attack ?? AnimationType.Attack)
+        actions.add(conf.ability ?? AnimationType.SpAttack)
+        actions.add(conf.emote ?? AnimationType.Pose)
 
-            if (metadata && metadata.CopyOf) {
+        for (const action of actions) {
+          let metadata = xmlData.AnimData.Anims.Anim.find(
+            (m) => m.Name == action
+          )
+          const imgPath = expandHomeDir(
+            `${path}/sprite/${pad}/${metadata?.CopyOf || action}-${anim}.png`
+          )
+          try {
+            const img = await Jimp.read(imgPath)
+
+            if (metadata?.CopyOf) {
               metadata = xmlData.AnimData.Anims.Anim.find(
                 (m) => m.Name == metadata?.CopyOf
               )
             }
 
-            durations[`${index}/${shiny}/${action}/${anim}`] =
-              metadata?.Durations.Duration.length !== undefined
-                ? [...metadata?.Durations.Duration]
-                : [metadata?.Durations.Duration]
-            const frameHeight = metadata?.FrameHeight
-            const frameWidth = metadata?.FrameWidth
+            if (!metadata?.Durations?.Duration) {
+              logger.error("no duration found for metadata", metadata)
+            } else {
+              durations[`${index}/${shiny}/${action}/${anim}`] =
+                metadata?.Durations.Duration.length !== undefined
+                  ? [...metadata.Durations.Duration]
+                  : [metadata.Durations.Duration]
+              const frameHeight = metadata?.FrameHeight
+              const frameWidth = metadata?.FrameWidth
 
-            if (frameWidth && frameHeight) {
-              const width = img.width / frameWidth
-              const height = img.height / frameHeight
-              // logger.debug('img', index, 'action', action, 'frame height', metadata.FrameHeight, 'frame width', metadata.FrameWidth, 'width', img.getWidth(), 'height', img.getHeight(), ':', width, height);
-              for (let x = 0; x < width; x++) {
-                for (let y = 0; y < height; y++) {
-                  const cropImg = img.clone()
+              if (frameWidth && frameHeight) {
+                const width = img.width / frameWidth
+                const height = img.height / frameHeight
+                // logger.debug('img', index, 'action', action, 'frame height', metadata.FrameHeight, 'frame width', metadata.FrameWidth, 'width', img.getWidth(), 'height', img.getHeight(), ':', width, height);
+                for (let x = 0; x < width; x++) {
+                  for (let y = 0; y < height; y++) {
+                    const cropImg = img.clone()
 
-                  if (anim == SpriteType.SHADOW) {
-                    const shadow = xmlData.AnimData.ShadowSize
-                    if (shadow == 0) {
-                      removeRed(cropImg)
-                      removeBlue(cropImg)
-                    } else if (shadow == 1) {
-                      removeBlue(cropImg)
-                    }
-                    // transform to black
-                    cropImg.scan(
-                      0,
-                      0,
-                      cropImg.bitmap.width,
-                      cropImg.bitmap.height,
-                      (x, y, idx) => {
-                        if (cropImg.bitmap.data[idx + 3] != 0) {
-                          cropImg.bitmap.data[idx] = 0
-                          cropImg.bitmap.data[idx + 1] = 0
-                          cropImg.bitmap.data[idx + 2] = 0
-                        }
+                    if (anim == SpriteType.SHADOW) {
+                      const shadow = xmlData.AnimData.ShadowSize
+                      if (shadow == 0) {
+                        removeRed(cropImg)
+                        removeBlue(cropImg)
+                      } else if (shadow == 1) {
+                        removeBlue(cropImg)
                       }
+                      // transform to black
+                      cropImg.scan(
+                        0,
+                        0,
+                        cropImg.bitmap.width,
+                        cropImg.bitmap.height,
+                        (x, y, idx) => {
+                          if (cropImg.bitmap.data[idx + 3] != 0) {
+                            cropImg.bitmap.data[idx] = 0
+                            cropImg.bitmap.data[idx + 1] = 0
+                            cropImg.bitmap.data[idx + 2] = 0
+                          }
+                        }
+                      )
+                    }
+
+                    cropImg.crop({
+                      x: x * frameWidth,
+                      y: y * frameHeight,
+                      w: frameWidth,
+                      h: frameHeight
+                    })
+
+                    await ensureDir(
+                      `split/${index}/${shiny}/${action}/${anim}/${y}`
+                    )
+                    await cropImg.write(
+                      `split/${index}/${shiny}/${action}/${anim}/${y}/${zeroPad(
+                        x
+                      )}.png`
                     )
                   }
-
-                  cropImg.crop({
-                    x: x * frameWidth,
-                    y: y * frameHeight,
-                    w: frameWidth,
-                    h: frameHeight
-                  })
-
-                  await ensureDir(
-                    `split/${index}/${shiny}/${action}/${anim}/${y}`
-                  )
-                  await cropImg.write(
-                    `split/${index}/${shiny}/${action}/${anim}/${y}/${zeroPad(
-                      x
-                    )}.png`
-                  )
                 }
               }
             }
           } catch (error) {
-            logger.error(error)
+            logger.error(`Error parsing animation ${imgPath}`, error)
             logger.warn(
               "action",
               action,
@@ -343,7 +353,8 @@ async function splitIndex(index: string) {
         "not found",
         mapName.get(index),
         "path: ",
-        `${path}/sprite/${pad}/AnimData.xml`
+        `${path}/sprite/${pad}/AnimData.xml`,
+        error
       )
       missing += `${mapName.get(index)},${pad}/AnimData.xml\n`
     }

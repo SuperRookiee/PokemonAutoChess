@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo } from "react"
 import { useTranslation } from "react-i18next"
-import { IPokemonConfig } from "../../../../../models/mongo-models/user-metadata"
+import { IPokemonCollectionItem } from "../../../../../models/mongo-models/user-metadata"
 import { PRECOMPUTED_EMOTIONS_PER_POKEMON_INDEX } from "../../../../../models/precomputed/precomputed-emotions"
 import { Emotion } from "../../../../../types"
 import {
@@ -15,10 +15,12 @@ import {
   changeAvatar,
   changeSelectedEmotion
 } from "../../../stores/NetworkStore"
-import { getAvatarSrc, getPortraitSrc } from "../../../utils"
+import { getAvatarSrc, getPortraitSrc } from "../../../../../utils/avatar"
 import { cc } from "../../utils/jsx"
 import { Modal } from "../modal/modal"
 import PokemonEmotion from "./pokemon-emotion"
+import { BoosterPriceByRarity } from "../../../../../types/Config"
+import { getPokemonData } from "../../../../../models/precomputed/precomputed-pokemon-data"
 import "./pokemon-emotions-modal.css"
 
 export default function PokemonEmotionsModal(props: {
@@ -28,11 +30,13 @@ export default function PokemonEmotionsModal(props: {
   const { t } = useTranslation()
   const dispatch = useAppDispatch()
   const pokemonCollection = useAppSelector(
-    (state) => state.network.profile?.pokemonCollection ?? new Map<string, IPokemonConfig>()
+    (state) => state.network.profile?.pokemonCollection ?? new Map<string, IPokemonCollectionItem>()
   )
   const user = useAppSelector((state) => state.network.profile)
 
   const index = PkmIndex[props.pokemon]
+  const rarity = getPokemonData(props.pokemon).rarity
+  const boosterCost = BoosterPriceByRarity[rarity]
 
   const availableEmotions: Emotion[] = Object.values(Emotion).filter(
     (e, i) => PRECOMPUTED_EMOTIONS_PER_POKEMON_INDEX[index]?.[i] === 1
@@ -42,13 +46,14 @@ export default function PokemonEmotionsModal(props: {
     AnimationConfig[props.pokemon]?.shinyUnavailable !== true
 
   const pConfig = useMemo(() => {
-    const foundPokemon = pokemonCollection.get(index) ?? {
+    const foundPokemon: IPokemonCollectionItem = pokemonCollection.get(index) ?? {
       dust: 0,
       emotions: [],
       shinyEmotions: [],
       selectedEmotion: Emotion.NORMAL,
       selectedShiny: false,
-      id: "0000"
+      id: "0000",
+      played: 0
     }
 
     return foundPokemon
@@ -68,6 +73,10 @@ export default function PokemonEmotionsModal(props: {
     [dispatch]
   )
 
+  const resetEmotion = useCallback(() => {
+    dispatch(changeSelectedEmotion({ index: index, emotion: null, shiny: false }))
+  }, [dispatch])
+
   return (
     <Modal
       show={true}
@@ -78,15 +87,19 @@ export default function PokemonEmotionsModal(props: {
           src={getPortraitSrc(
             index,
             pConfig.selectedShiny,
-            pConfig.selectedEmotion
+            pConfig.selectedEmotion ?? Emotion.NORMAL
           )}
           className={cc({ unlocked: pConfig != null })}
         />
-        <h2>{t(`pkm.${props.pokemon}`)}</h2>
+        <h2>{t(`pkm.${props.pokemon}`)} #{PkmIndex[props.pokemon]} - {t("played_times", { count: pConfig.played ?? 0 })}</h2>
         <div className="spacer" />
         <p className="dust">
+          <img
+            src={getPortraitSrc(index)}
+            className="dust"
+            alt="dust"
+          />
           {pConfig.dust} {t("shards")}{" "}
-          <img src={getPortraitSrc(index)} className="dust" alt="dust" />
         </p>
       </>}
       body={<>
@@ -158,14 +171,14 @@ export default function PokemonEmotionsModal(props: {
               getPortraitSrc(
                 index,
                 pConfig.selectedShiny,
-                pConfig.selectedEmotion
+                pConfig.selectedEmotion ?? Emotion.NORMAL
               ))
           }
           onClick={() =>
             dispatch(
               changeAvatar({
                 index,
-                emotion: pConfig.selectedEmotion,
+                emotion: pConfig.selectedEmotion ?? Emotion.NORMAL,
                 shiny: pConfig.selectedShiny
               })
             )
@@ -176,7 +189,7 @@ export default function PokemonEmotionsModal(props: {
             src={getPortraitSrc(
               index,
               pConfig.selectedShiny,
-              pConfig.selectedEmotion
+              pConfig.selectedEmotion ?? Emotion.NORMAL
             )}
             alt="avatar"
           />
@@ -184,12 +197,17 @@ export default function PokemonEmotionsModal(props: {
 
         <button
           className="bubbly orange"
-          disabled={pConfig.dust < 500}
+          disabled={pConfig.dust < boosterCost}
           onClick={() => dispatch(buyBooster({ index }))}
         >
-          {t("buy_booster_500")}
+          {t("buy_booster", { cost: boosterCost })}
           <img src={getPortraitSrc(index)} className="dust" alt="dust" />
         </button>
+
+        {pConfig.selectedEmotion != null && pConfig.selectedEmotion != Emotion.NORMAL && <button className="bubbly blue" onClick={resetEmotion}>
+          {t("reset_emotion")}
+        </button>}
+
         <div className="spacer"></div>
         <button className="bubbly red" onClick={props.onClose}>
           {t("close")}

@@ -27,17 +27,49 @@
   margin: -6px -12px;
 }
 
+.wiki-modal {
+  overflow: visible;
+}
+
 #wiki-page .wiki-types li[role="tab"] {
-  padding: 4px 5px;
+  padding: 4px;
   line-height: 40px;
   min-width: 48px;
   text-align: center;
+}
+
+#wiki-page .synergy-overlaps {
+  display: grid;
+  max-width: 300px;
+  grid-template-columns: repeat(auto-fit, 80px);
+  gap: 0.5em;
+  margin: 1em;
+}
+
+.synergy-overlaps li {
+  display: flex;
+  align-items: center;
+  background-color: var(--color-bg-secondary);
+  border-radius: 8px;
+  background-color: var(--color-bg-secondary);
+  border: var(--border-extra-thin);
+  cursor: var(--cursor-hover);
+}
+
+.synergy-overlaps li.active {
+  background-color: var(--color-bg-accent);
+}
+
+.synergy-overlaps li > img:nth-child(2) {
+  margin-left: -25px;
+  z-index: 2;
 }
 
 #wiki-page > .react-tabs > .react-tabs__tab-panel {
   height: 75vh;
   padding: 0.5em 0 40px 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 #wiki-page .pokemon-name {
@@ -111,6 +143,12 @@
 #wiki-page .wiki-status li > img {
   border-radius: 8px;
   border: 2px solid #000000;
+}
+
+#wiki-page .wiki-stat li > img {
+  width: 64px;
+  height: 64px;
+  margin-right: 10px;
 }
 
 #wiki-page .wiki-status li .status-label {
@@ -232,6 +270,7 @@
 }
 
 #wiki-weather .my-box header .weather-icon {
+  aspect-ratio: 1 / 1;
   height: 40px;
 }
 
@@ -257,6 +296,11 @@
 
 #wiki-ability .my-box p {
   font-size: 0.8em;
+}
+
+#wiki-ability img.item {
+  width: 45px;
+  height: 45px;
 }
 
 #wiki-items {
@@ -286,14 +330,13 @@
   grid-column: 1 / 3;
 }
 
-#wiki-items .artificial,
-#wiki-items .weather-rocks {
+#wiki-items article:nth-child(n + 3) {
   grid-column: 1 / 3;
 }
 
 #wiki-items img.item {
-  width: 50px;
-  height: 50px;
+  width: 45px;
+  height: 45px;
   cursor: var(--cursor-hover);
   margin: 8px;
 }
@@ -336,6 +379,12 @@
 #wiki-data-tiers-by-level th,
 #wiki-data-booster-rarity-probability th {
   width: 10ch;
+}
+
+#wiki-page input[type="search"] {
+  display: block;
+  margin: 0.5em 0 0.5em auto;
+  width: auto;
 }
 
 @media (width <= 960px) {

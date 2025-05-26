@@ -1,20 +1,18 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { Tooltip } from "react-tooltip"
-import { IPokemonConfig } from "../../../../../models/mongo-models/user-metadata"
 import { getPokemonData } from "../../../../../models/precomputed/precomputed-pokemon-data"
 import { RarityColor } from "../../../../../types/Config"
 import { SpecialGameRule } from "../../../../../types/enum/SpecialGameRule"
-import { useAppSelector } from "../../../hooks"
-import { getPortraitSrc } from "../../../utils"
-import { getGameScene } from "../../game"
+import { selectCurrentPlayer, useAppSelector } from "../../../hooks"
 import SynergyIcon from "../icons/synergy-icon"
+import { getCachedPortrait } from "./game-pokemon-portrait"
 
 export function GameAdditionalPokemonsIcon() {
   return (
     <div className="my-box" style={{ padding: "5px" }}>
       <img
-        src={`assets/ui/addpicks.png`}
+        src="assets/ui/addpicks.png"
         style={{ width: "2em", height: "2em" }}
         data-tooltip-id={"game-additional-pokemons"}
       />
@@ -32,13 +30,12 @@ export function GameAdditionalPokemonsIcon() {
 
 export function GameAdditionalPokemons() {
   const { t } = useTranslation()
-  const specialGameRule = getGameScene()?.room?.state.specialGameRule
+
+  const specialGameRule = useAppSelector((state) => state.game.specialGameRule)
   const additionalPokemons = useAppSelector(
     (state) => state.game.additionalPokemons
   )
-  const pokemonCollection = useAppSelector(
-    (state) => state.game.pokemonCollection
-  )
+  const currentPlayer = useAppSelector(selectCurrentPlayer)
 
   if (specialGameRule === SpecialGameRule.EVERYONE_IS_HERE) {
     return (
@@ -61,21 +58,14 @@ export function GameAdditionalPokemons() {
           {additionalPokemons.map((p, index) => {
             const pokemon = getPokemonData(p)
             const rarityColor = RarityColor[pokemon.rarity]
-            const pokemonConfig: IPokemonConfig | undefined =
-              pokemonCollection.get(pokemon.index)
-
             return (
               <div
-                className={`my-box clickable game-pokemon-portrait`}
+                className="my-box clickable game-pokemon-portrait"
                 key={"game-additional-pokemons-" + index}
                 style={{
                   backgroundColor: rarityColor,
                   borderColor: rarityColor,
-                  backgroundImage: `url("${getPortraitSrc(
-                    pokemon.index,
-                    pokemonConfig?.selectedShiny,
-                    pokemonConfig?.selectedEmotion
-                  )}")`
+                  backgroundImage: `url("${getCachedPortrait(pokemon.index, currentPlayer?.pokemonCustoms)}")`
                 }}
               >
                 <ul className="game-pokemon-portrait-types">

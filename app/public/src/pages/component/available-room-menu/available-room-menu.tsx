@@ -8,9 +8,8 @@ import {
   Role,
   Transfer
 } from "../../../../../types"
-import { MAX_PLAYERS_PER_GAME } from "../../../../../types/Config"
 import { GameMode } from "../../../../../types/enum/Game"
-import { throttle } from "../../../../../utils/function"
+import { block, throttle } from "../../../../../utils/function"
 import { useAppDispatch, useAppSelector } from "../../../hooks"
 import RoomItem from "./room-item"
 import { RoomSelectionMenu } from "./room-selection-menu"
@@ -30,46 +29,40 @@ export default function AvailableRoomMenu() {
   const lobby: Room<ICustomLobbyState> | undefined = useAppSelector(
     (state) => state.network.lobby
   )
-  const uid: string = useAppSelector((state) => state.network.uid)
   const user = useAppSelector((state) => state.network.profile)
-  const [isJoining, setJoining] = useState<boolean>(false)
   const [showRoomSelectionMenu, setShowRoomSelectionMenu] = useState<boolean>(false)
 
   const requestRoom = throttle(async function (gameMode: GameMode) {
-    if (lobby && !isJoining) {
-      setJoining(true)
+    if (lobby) {
       lobby.send(Transfer.REQUEST_ROOM, gameMode)
+      setShowRoomSelectionMenu(false)
     }
   }, 1000)
 
-  const requestJoiningExistingRoom = throttle(async function join(
+  const onRoomAction = (room: RoomAvailable<IPreparationMetadata>, action: string) => {
+    if (action === "join") {
+      requestJoiningExistingRoom(room)
+    } else if (action === "delete" && user?.role === Role.ADMIN) {
+      confirm('Delete room ?') && lobby?.send(Transfer.DELETE_ROOM, room.roomId)
+    }
+  }
+
+  const requestJoiningExistingRoom = block(async function join(
     selectedRoom: RoomAvailable<IPreparationMetadata>
   ) {
-    const { whitelist, blacklist, gameStartedAt, password } =
-      selectedRoom.metadata ?? {}
-    if (
-      selectedRoom.clients >= MAX_PLAYERS_PER_GAME ||
-      gameStartedAt ||
-      (whitelist &&
-        whitelist.length > 0 &&
-        whitelist.includes(uid) === false) ||
-      (blacklist && blacklist.length > 0 && blacklist.includes(uid) === true)
-    ) {
-      return
-    }
+    const password = selectedRoom.metadata?.password
 
-    if (lobby && !isJoining) {
-      if (password) {
-        if (user && user.role === Role.BASIC) {
-          const password = prompt(`This room is private. Enter password`)
-          if (selectedRoom.metadata?.password != password)
-            return alert(`Wrong password !`)
-        }
+    if (lobby) {
+      if (password && user?.role === Role.BASIC) {
+        const password = prompt(t("room_is_private"))
+        if (password && selectedRoom.metadata?.password != password)
+          return alert(t("wrong_password"))
+        else if (!password) return
       }
 
-      joinExistingPreparationRoom(selectedRoom.roomId, client, lobby, dispatch, navigate)
+      await joinExistingPreparationRoom(selectedRoom.roomId, client, lobby, dispatch, navigate)
     }
-  }, 1000)
+  })
 
   return (
     <div className="my-container room-menu custom-bg">
@@ -83,7 +76,7 @@ export default function AvailableRoomMenu() {
           <ul>
             {preparationRooms.map((r) => (
               <li key={r.roomId}>
-                <RoomItem room={r} click={(room) => requestJoiningExistingRoom(room)} />
+                <RoomItem room={r} click={action => onRoomAction(r, action)} />
               </li>
             ))}
           </ul>

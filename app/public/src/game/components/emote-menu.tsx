@@ -8,7 +8,7 @@ import { AvatarEmotions, Emotion } from "../../../../types/enum/Emotion"
 import { logger } from "../../../../utils/logger"
 import { cc } from "../../pages/utils/jsx"
 import store from "../../stores"
-import { getPortraitSrc } from "../../utils"
+import { getPortraitSrc } from "../../../../utils/avatar"
 import GameScene from "../scenes/game-scene"
 import "./emote-menu.css"
 
@@ -26,19 +26,12 @@ export function EmoteMenuComponent(props: {
     )
   })
 
-  const pokemonCollection = props.player.pokemonCollection
-  const pConfig = pokemonCollection[props.index] ?? {
-    emotions: [],
-    shinyEmotions: []
-  }
-
   return emotions.length === 0 ? (
     <div>{t("no_emotions_available")}</div>
   ) : (
     <ul>
       {emotions.map((emotion, i) => {
-        const emotions = props.shiny ? pConfig.shinyEmotions : pConfig.emotions
-        const unlocked = pConfig && emotions.includes(emotion)
+        const unlocked = store.getState().game.emotesUnlocked.includes(emotion)
         return (
           <li key={emotion}>
             <img

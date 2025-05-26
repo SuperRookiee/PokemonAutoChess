@@ -6,13 +6,12 @@ import {
   IBot,
   IDetailledPokemon
 } from "../../../../../models/mongo-models/bot-v2"
-import { PkmWithConfig, Role } from "../../../../../types"
+import { PkmWithCustom, Role } from "../../../../../types"
 import { PkmIndex } from "../../../../../types/enum/Pokemon"
 import { logger } from "../../../../../utils/logger"
 import { max, min } from "../../../../../utils/number"
 import { useAppDispatch, useAppSelector } from "../../../hooks"
-import store from "../../../stores"
-import { getAvatarString } from "../../../utils"
+import { getAvatarString } from "../../../../../utils/avatar"
 import DiscordButton from "../buttons/discord-button"
 import {
   DEFAULT_BOT_STATE,
@@ -24,15 +23,14 @@ import {
   getPowerScore,
   rewriteBotRoundsRequiredto1,
   validateBoard
-} from "./bot-logic"
+} from "../../../../../core/bot-logic"
 import ImportBotModal from "./import-bot-modal"
-import ExportBotModal from "./export-bot-modal"
+import { Modal } from "../modal/modal"
 import ScoreIndicator from "./score-indicator"
 import TeamBuilder from "./team-builder"
 import { joinLobbyRoom } from "../../../game/lobby-logic"
+import firebase from "firebase/compat/app"
 import "./bot-builder.css"
-import { CloseCodesMessages } from "../../../../../types/enum/CloseCodes"
-import { setErrorAlertMessage } from "../../../stores/NetworkStore"
 
 export default function BotBuilder() {
   const { t } = useTranslation()
@@ -44,6 +42,7 @@ export default function BotBuilder() {
   const [currentModal, setCurrentModal] = useState<"import" | "export" | null>(null)
   const [violation, setViolation] = useState<string>()
   const user = useAppSelector((state) => state.network.profile)
+  const isBotManager = user?.role === Role.BOT_MANAGER || user?.role === Role.ADMIN
 
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
@@ -74,7 +73,7 @@ export default function BotBuilder() {
         logger.debug(`bot ${botId} imported`)
       })
     }
-  }, [queryParams, bot])
+  }, [queryParams])
 
   const prevStep = useCallback(
     () => setStage(min(1)(currentStage - 1)),
@@ -107,14 +106,14 @@ export default function BotBuilder() {
     }
   }
 
-  function changeAvatar(pkm: PkmWithConfig) {
+  function changeAvatar(pkm: PkmWithCustom) {
     bot.name = pkm.name.toUpperCase()
     bot.avatar = getAvatarString(PkmIndex[pkm.name], pkm.shiny, pkm.emotion)
     completeBotInfo()
   }
 
   function completeBotInfo() {
-    if (bot.id) {
+    if (bot.id && !isBotManager) {
       // fork existing bot
       setQueryParams({})
       bot.id = ""
@@ -167,13 +166,11 @@ export default function BotBuilder() {
           {t("back_to_lobby")}
         </button>
         <div className="spacer"></div>
-        {(user?.role === Role.ADMIN ||
-          user?.role === Role.MODERATOR ||
-          user?.role === Role.BOT_MANAGER) && (
-            <button onClick={() => navigate("/bot-admin")} className="bubbly red">
-              {t("bot_admin")}
-            </button>
-          )}
+        {isBotManager && (
+          <button onClick={() => navigate("/bot-admin")} className="bubbly red">
+            {t("bot_admin")}
+          </button>
+        )}
         <button
           onClick={() => { setCurrentModal("import") }}
           className="bubbly orange"
@@ -185,9 +182,9 @@ export default function BotBuilder() {
             completeBotInfo()
             setCurrentModal("export")
           }}
-          className="bubbly orange"
+          className="bubbly green"
         >
-          {t("export")}
+          {t("submit")}
         </button>
         <DiscordButton url={"https://discord.com/channels/737230355039387749/914503292875325461"} />
       </header>
@@ -233,7 +230,7 @@ export default function BotBuilder() {
         importBot={importBot}
       />
 
-      <ExportBotModal
+      <SubmitBotModal
         visible={currentModal === "export"}
         bot={bot}
         hideModal={() => { setCurrentModal(null) }}
@@ -241,3 +238,63 @@ export default function BotBuilder() {
     </div>
   )
 }
+
+
+export function SubmitBotModal(props: {
+  bot: IBot
+  hideModal: () => void
+  visible: boolean
+}) {
+  const { t } = useTranslation()
+
+  const [loading, setLoading] = useState<boolean>(false)
+  const [error, setError] = useState<string>("")
+  const [success, setSuccess] = useState<boolean>(false)
+
+  async function submitBot() {
+    if (loading) return
+    setLoading(true)
+    setError("")
+    setSuccess(false)
+    try {
+      const token = await firebase.auth().currentUser?.getIdToken()
+      const res = await fetch("/bots", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify(props.bot)
+      })
+      if (res.ok) {
+        setSuccess(true)
+      } else {
+        setError(res.statusText)
+      }
+    } catch (err) {
+      setError(err.message)
+    }
+    setLoading(false)
+  }
+
+  return (
+    <Modal
+      show={props.visible}
+      onClose={props.hideModal}
+      className="bot-export-modal"
+      header={t("submit_your_bot")}
+      body={<>
+        <p>{t("bot_ready_submission")}</p>
+      </>}
+      footer={<>
+        {!success && !loading && !error && <button className="bubbly green" onClick={submitBot}>
+          {t("submit_your_bot")}
+        </button>}
+        {loading && <p>{t("loading")}</p>}
+        {!loading && error && <p className="error">{t("bot_submission_failed", { error })}</p>}
+        {success && <p>{t("bot_submitted_success")}</p>}
+      </>}
+    />
+  )
+}
+

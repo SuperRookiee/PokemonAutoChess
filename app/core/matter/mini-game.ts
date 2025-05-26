@@ -12,40 +12,52 @@ import { FloatingItem } from "../../models/colyseus-models/floating-item"
 import Player from "../../models/colyseus-models/player"
 import { PokemonAvatarModel } from "../../models/colyseus-models/pokemon-avatar"
 import { Portal, SynergySymbol } from "../../models/colyseus-models/portal"
-import { getOrientation } from "../../public/src/pages/utils/utils"
+import { getOrientation } from "../../utils/orientation"
 import GameRoom from "../../rooms/game-room"
 import GameState from "../../rooms/states/game-state"
 import { Transfer } from "../../types"
 import {
   ItemCarouselStages,
-  KECLEON_SHOP_COST,
   PortalCarouselStages,
   SynergyTriggers
 } from "../../types/Config"
 import { DungeonDetails, DungeonPMDO } from "../../types/enum/Dungeon"
 import { PokemonActionState } from "../../types/enum/Game"
 import {
+  ArtificialItems,
+  Berries,
   CraftableItems,
+  CraftableNonSynergyItems,
   Item,
   ItemComponents,
   SynergyStones
 } from "../../types/enum/Item"
-import { SpecialGameRule } from "../../types/enum/SpecialGameRule"
 import { Synergy } from "../../types/enum/Synergy"
 import { clamp, min } from "../../utils/number"
 import {
+  chance,
   pickNRandomIn,
   pickRandomIn,
   randomBetween,
+  randomWeighted,
   shuffleArray
 } from "../../utils/random"
 import { keys, values } from "../../utils/schemas"
+import {
+  TownEncounters,
+  TownEncountersByStage,
+  TownEncounterSellPrice
+} from "../town-encounters"
+import { giveRandomEgg } from "../eggs"
+import { SpecialGameRule } from "../../types/enum/SpecialGameRule"
 
 const PLAYER_VELOCITY = 2
 const ITEM_ROTATION_SPEED = 0.0004
 const PORTAL_ROTATION_SPEED = 0.0003
 const SYMBOL_ROTATION_SPEED = 0.0006
-const CAROUSEL_RADIUS = 150
+const CAROUSEL_RADIUS_X = 150
+const CAROUSEL_RADIUS_Y = 125
+const AVATAR_RADIUS = 25
 const NB_SYMBOLS_PER_PLAYER = 4
 
 export class MiniGame {
@@ -57,8 +69,10 @@ export class MiniGame {
   bodies: Map<string, Body>
   alivePlayers: Player[]
   engine: Engine
-  centerX: number = 325
-  centerY: number = 250
+  centerX: number = 335
+  centerY: number = 235
+  timeElapsed: number = 0
+  rotationDirection: number = 1
 
   constructor(room: GameRoom) {
     this.engine = Engine.create({ gravity: { x: 0, y: 0 } })
@@ -66,34 +80,50 @@ export class MiniGame {
     this.alivePlayers = []
     Composite.add(
       this.engine.world,
-      Bodies.rectangle(0, -70, 2000, 40, { isStatic: true, restitution: 1 })
+      // bottom wall
+      Bodies.rectangle(-50, -70, 2000, 40, {
+        isStatic: true,
+        restitution: 1
+      })
     )
     Composite.add(
       this.engine.world,
-      Bodies.rectangle(-70, 0, 40, 2000, { isStatic: true, restitution: 1 })
+      // left wall
+      Bodies.rectangle(-70, 0, 40, 2000, {
+        isStatic: true,
+        restitution: 1
+      })
     )
     Composite.add(
       this.engine.world,
-      Bodies.rectangle(740, 0, 40, 2000, { isStatic: true, restitution: 1 })
+      // right wall
+      Bodies.rectangle(740, 0, 40, 2000, {
+        isStatic: true,
+        restitution: 1
+      })
     )
     Composite.add(
       this.engine.world,
-      Bodies.rectangle(0, 610, 2000, 40, { isStatic: true, restitution: 1 })
+      // up wall
+      Bodies.rectangle(-50, 540, 2000, 40, {
+        isStatic: true,
+        restitution: 1
+      })
     )
     Events.on(this.engine, "beforeUpdate", () => {
       this.items?.forEach((item) => {
         if (item.avatarId === "") {
           const itemBody = this.bodies.get(item.id)
           if (itemBody) {
-            const t = this.engine.timing.timestamp * ITEM_ROTATION_SPEED
+            const t = this.timeElapsed * ITEM_ROTATION_SPEED
             const x =
               this.centerX +
               Math.cos(t + (Math.PI * 2 * item.index) / this.items!.size) *
-                CAROUSEL_RADIUS
+                CAROUSEL_RADIUS_X
             const y =
               this.centerY +
               Math.sin(t + (Math.PI * 2 * item.index) / this.items!.size) *
-                CAROUSEL_RADIUS
+                CAROUSEL_RADIUS_Y
             Body.setPosition(itemBody, { x, y })
           }
         }
@@ -103,15 +133,15 @@ export class MiniGame {
         if (portal.avatarId === "") {
           const portalBody = this.bodies.get(portal.id)
           if (portalBody) {
-            const t = this.engine.timing.timestamp * PORTAL_ROTATION_SPEED
+            const t = this.timeElapsed * PORTAL_ROTATION_SPEED
             const x =
               this.centerX +
               Math.cos(t + (Math.PI * 2 * portal.index) / this.portals!.size) *
-                CAROUSEL_RADIUS
+                CAROUSEL_RADIUS_X
             const y =
               this.centerY +
               Math.sin(t + (Math.PI * 2 * portal.index) / this.portals!.size) *
-                CAROUSEL_RADIUS
+                CAROUSEL_RADIUS_Y
             Body.setPosition(portalBody, { x, y })
           }
         }
@@ -129,27 +159,33 @@ export class MiniGame {
           const itemBody = this.items?.has(bodyA.label) ? bodyA : bodyB
           const avatar = this.avatars.get(avatarBody.label)
           const item = this.items.get(itemBody.label)
+          const encounter = room.state.townEncounter
 
           if (avatar?.itemId === "" && item?.avatarId === "") {
-            if (room.state.specialGameRule === SpecialGameRule.KECLEONS_SHOP) {
+            if (encounter && encounter in TownEncounterSellPrice) {
               const player = room.state.players.get(avatar.id)
               const client = room.clients.find(
                 (cli) => cli.auth.uid === avatar.id
               )
-              if ((player?.money ?? 0) < KECLEON_SHOP_COST) {
+              const price =
+                room.state.specialGameRule === SpecialGameRule.TOWN_FESTIVAL
+                  ? 0
+                  : TownEncounterSellPrice[encounter]!
+              if ((player?.money ?? 0) < price) {
                 // too poor to buy one item from kecleon's shop
                 client?.send(Transfer.NPC_DIALOG, {
-                  npc: "kecleon",
-                  dialog: "tell_price"
+                  npc: encounter,
+                  dialog: "npc_dialog.tell_price",
+                  price: price
                 })
                 return
               } else {
                 client?.send(Transfer.NPC_DIALOG, {
-                  npc: "kecleon",
-                  dialog: "thank_you"
+                  npc: encounter,
+                  dialog: "npc_dialog.thank_you"
                 })
                 if (player) {
-                  player.money -= KECLEON_SHOP_COST
+                  player.money -= price
                 }
               }
             }
@@ -216,7 +252,8 @@ export class MiniGame {
   }
 
   initialize(state: GameState, room: GameRoom) {
-    const { players, stageLevel, specialGameRule } = state
+    const { players, stageLevel } = state
+    this.timeElapsed = 0
     this.alivePlayers = new Array<Player>()
     players.forEach((p) => {
       if (p.alive) {
@@ -232,23 +269,17 @@ export class MiniGame {
         Math.sin((2 * Math.PI * i) / this.alivePlayers.length) * 250
       let retentionDelay =
         4000 + (this.alivePlayers.length - player.rank) * 2000
-      if (stageLevel < 5) {
+
+      if (stageLevel === 0) {
+        retentionDelay = 12000
+      } else if (PortalCarouselStages.includes(stageLevel)) {
+        retentionDelay = 8000
+      } else if (stageLevel < 5) {
         retentionDelay = 5000
       }
-      if (PortalCarouselStages.includes(stageLevel)) {
-        retentionDelay = 8000
-      }
+
       if (player.isBot) {
         retentionDelay += randomBetween(1000, 6000)
-      }
-
-      if (
-        ItemCarouselStages.includes(stageLevel) &&
-        state.specialGameRule === SpecialGameRule.KECLEONS_SHOP
-      ) {
-        if (player.money < KECLEON_SHOP_COST) {
-          retentionDelay = Infinity
-        }
       }
 
       const avatar = new PokemonAvatarModel(
@@ -263,37 +294,79 @@ export class MiniGame {
         avatar.targetX =
           this.centerX +
           Math.cos((2 * Math.PI * i) / this.alivePlayers.length) *
-            CAROUSEL_RADIUS
+            CAROUSEL_RADIUS_X
         avatar.targetY =
           this.centerY +
           Math.sin((2 * Math.PI * i) / this.alivePlayers.length) *
-            CAROUSEL_RADIUS
+            CAROUSEL_RADIUS_Y
       }
 
       this.avatars!.set(avatar.id, avatar)
-      const body = Bodies.circle(x, y, 25)
+      const body = Bodies.circle(x, y, AVATAR_RADIUS)
       body.label = avatar.id
       body.collisionFilter.mask = 0 // disable collision until release time
       this.bodies.set(avatar.id, body)
       Composite.add(this.engine.world, body)
     })
 
+    if (stageLevel in TownEncountersByStage) {
+      let encounter = randomWeighted(
+        TownEncountersByStage[stageLevel],
+        state.specialGameRule === SpecialGameRule.TOWN_FESTIVAL ? undefined : 1
+      )
+      if (
+        encounter != null &&
+        state.townEncounters.has(encounter) &&
+        state.specialGameRule !== SpecialGameRule.TOWN_FESTIVAL
+      ) {
+        encounter = null // prevent getting the same encounter twice in a gamme
+      }
+      state.townEncounter = encounter ?? null
+      if (encounter) state.townEncounters.add(encounter)
+    } else {
+      state.townEncounter = null
+    }
+
     if (PortalCarouselStages.includes(stageLevel)) {
-      this.initializePortalCarousel()
+      this.initializePortalCarousel(stageLevel, room)
       room.broadcast(
         Transfer.PRELOAD_MAPS,
         values(this.portals!).map((p) => p.map)
       )
     } else if (ItemCarouselStages.includes(stageLevel)) {
-      this.initializeItemsCarousel(stageLevel, specialGameRule)
+      this.initializeItemsCarousel(state)
+    }
+
+    if (state.townEncounter === TownEncounters.SPINDA) {
+      this.rotationDirection = chance(1 / 2) ? 1.5 : -1.5
+      for (let i = 0; i < randomBetween(1, 3); i++) {
+        room.clock.setTimeout(
+          () => {
+            room.broadcast(Transfer.NPC_DIALOG, {
+              npc: TownEncounters.SPINDA
+            })
+            this.rotationDirection *= -1
+          },
+          randomBetween(5000, 14000)
+        )
+      }
+    } else if (state.townEncounter === TownEncounters.REGIROCK) {
+      this.alivePlayers.forEach((player) => {
+        player.life += 15
+      })
+    } else if (state.townEncounter === TownEncounters.WOBBUFFET) {
+      this.alivePlayers.forEach((player) => {
+        player.items.push(Item.EXCHANGE_TICKET)
+      })
+    } else if (state.townEncounter === TownEncounters.MUNCHLAX) {
+      this.alivePlayers.forEach((player) => {
+        player.items.push(Item.PICNIC_SET)
+      })
     }
   }
 
-  initializeItemsCarousel(
-    stageLevel: number,
-    specialGameRule: SpecialGameRule | null
-  ) {
-    const items = this.pickRandomItems(stageLevel, specialGameRule)
+  initializeItemsCarousel(state: GameState) {
+    const items = this.pickRandomItems(state)
 
     for (let j = 0; j < items.length; j++) {
       const x = this.centerX + Math.cos((Math.PI * 2 * j) / items.length) * 100
@@ -309,7 +382,7 @@ export class MiniGame {
     }
   }
 
-  initializePortalCarousel() {
+  initializePortalCarousel(stageLevel: number, room: GameRoom) {
     const nbPortals = clamp(this.alivePlayers.length + 1, 3, 9)
     for (let i = 0; i < nbPortals; i++) {
       const x = this.centerX + Math.cos((Math.PI * 2 * i) / nbPortals) * 115
@@ -323,10 +396,11 @@ export class MiniGame {
       Composite.add(this.engine.world, body)
     }
 
-    this.pickRandomSynergySymbols()
+    this.pickRandomSynergySymbols(stageLevel, room)
   }
 
   update(dt: number) {
+    this.timeElapsed += dt * this.rotationDirection
     Engine.update(this.engine, dt)
     this.avatars?.forEach((a) => {
       if (a.timer > 0) {
@@ -342,8 +416,8 @@ export class MiniGame {
       ) {
         // prevent going out of bounds in case of lag
         Body.setPosition(body, {
-          x: clamp(body.position.x, 0, 720),
-          y: clamp(body.position.y, 0, 590)
+          x: clamp(body.position.x, -50 + AVATAR_RADIUS, 740 - AVATAR_RADIUS),
+          y: clamp(body.position.y, -70 + AVATAR_RADIUS, 540 - AVATAR_RADIUS)
         })
       }
       if (this.avatars?.has(id)) {
@@ -359,24 +433,30 @@ export class MiniGame {
         const portal = this.portals.get(id)!
         portal.x = body.position.x
         portal.y = body.position.y
-        const t = this.engine.timing.timestamp * SYMBOL_ROTATION_SPEED
         const symbols = this.symbolsByPortal.get(portal.id) ?? []
         symbols.forEach((symbol) => {
           symbol.x =
             portal.x +
-            Math.cos(t + (Math.PI * 2 * symbol.index) / symbols.length) * 25
+            Math.cos(
+              this.timeElapsed * SYMBOL_ROTATION_SPEED +
+                (Math.PI * 2 * symbol.index) / symbols.length
+            ) *
+              25
           symbol.y =
             portal.y +
-            Math.sin(t + (Math.PI * 2 * symbol.index) / symbols.length) * 25
+            Math.sin(
+              this.timeElapsed * SYMBOL_ROTATION_SPEED +
+                (Math.PI * 2 * symbol.index) / symbols.length
+            ) *
+              25
         })
       }
     })
   }
 
-  pickRandomItems(
-    stageLevel: number,
-    specialGameRule: SpecialGameRule | null
-  ): Item[] {
+  pickRandomItems(state: GameState): Item[] {
+    const stageLevel = state.stageLevel
+    const encounter = state.townEncounter
     const items: Item[] = []
 
     let nbItemsToPick = clamp(this.alivePlayers.length + 3, 5, 9)
@@ -390,15 +470,37 @@ export class MiniGame {
       itemsSet = CraftableItems
     }
 
-    if (specialGameRule === SpecialGameRule.SYNERGY_WHEEL) {
+    if (encounter === TownEncounters.KECLEON) {
       itemsSet = SynergyStones
-      maxCopiesPerItem = 4
+      maxCopiesPerItem = 2
     }
 
-    if (specialGameRule === SpecialGameRule.KECLEONS_SHOP) {
-      itemsSet = CraftableItems
+    if (encounter === TownEncounters.KANGASKHAN) {
+      itemsSet = CraftableNonSynergyItems
       maxCopiesPerItem = 1
-      nbItemsToPick = 6
+    }
+
+    if (encounter === TownEncounters.ELECTIVIRE) {
+      itemsSet = ArtificialItems
+      maxCopiesPerItem = 2
+    }
+
+    if (encounter === TownEncounters.CHANSEY) {
+      itemsSet = [Item.EGG_FOR_SELL]
+      nbItemsToPick = this.alivePlayers.length
+      maxCopiesPerItem = 99
+    }
+
+    if (encounter === TownEncounters.XATU) {
+      itemsSet = [Item.WONDER_BOX]
+      nbItemsToPick = this.alivePlayers.length
+      maxCopiesPerItem = 99
+    }
+
+    if (encounter === TownEncounters.DUSKULL) {
+      itemsSet = [Item.GIMMIGHOUL_COIN]
+      nbItemsToPick = this.alivePlayers.length
+      maxCopiesPerItem = 99
     }
 
     for (let j = 0; j < nbItemsToPick; j++) {
@@ -412,63 +514,85 @@ export class MiniGame {
       } while (count >= maxCopiesPerItem && tries < 10)
       items.push(item)
     }
+
+    if (itemsSet === CraftableItems) {
+      while (items.filter((i) => SynergyStones.includes(i)).length > 4) {
+        // ensure that there are at most 4 synergy stones in the carousel
+        const index = items.findIndex((i) => SynergyStones.includes(i))
+        items[index] = pickRandomIn(CraftableNonSynergyItems)
+      }
+    }
+
     return items
   }
 
-  pickRandomSynergySymbols() {
-    this.avatars?.forEach((avatar) => {
-      const player = this.alivePlayers.find((p) => p.id === avatar.id)!
-      const synergiesTriggerLevels: [Synergy, number][] = Array.from(
-        player.synergies
-      ).map(([type, value]) => {
-        const lastTrigger = SynergyTriggers[type]
-          .filter((n) => n <= value)
-          .at(-1)
-        let levelReached = lastTrigger
-          ? SynergyTriggers[type].indexOf(lastTrigger) + 1
-          : 0
-        // removing low triggers synergies
-        if (type === Synergy.FLORA || type === Synergy.LIGHT)
-          levelReached = min(0)(levelReached - 1)
-        return [type, levelReached]
-      })
-      const candidatesSymbols: Synergy[] = []
-      synergiesTriggerLevels.forEach(([type, level]) => {
-        // add as many symbols as synergy levels reached
-        candidatesSymbols.push(...new Array(level).fill(type))
-      })
-      //logger.debug("symbols from synergies", candidatesSymbols)
-      if (candidatesSymbols.length < 4) {
-        // if player has reached less than 4 synergy level triggers, we complete with random other incomplete synergies
-        const incompleteSynergies = synergiesTriggerLevels
-          .filter(
-            ([type, level]) => level === 0 && player.synergies.get(type)! > 0
-          )
-          .map(([type, _level]) => type)
-        candidatesSymbols.push(
-          ...pickNRandomIn(incompleteSynergies, 4 - candidatesSymbols.length)
-        )
-        /*logger.debug(
-          "completing symbols with incomplete synergies",
-          incompleteSynergies
-        )*/
-      }
-      while (candidatesSymbols.length < 4) {
-        // if still incomplete, complete with random
-        candidatesSymbols.push(pickRandomIn(Synergy))
-        /*logger.debug(
-          "completing symbols with random synergies",
-          candidatesSymbols
-        )*/
-      }
-
-      const symbols = pickNRandomIn(candidatesSymbols, NB_SYMBOLS_PER_PLAYER)
+  pickRandomSynergySymbols(stageLevel: number, room: GameRoom) {
+    if (stageLevel === 0) {
+      const symbols = pickNRandomIn(
+        Object.values(Synergy),
+        3 * ((this.avatars?.size ?? 8) + 1)
+      )
       //logger.debug(`symbols chosen for player ${player.name}`, symbols)
       symbols.forEach((type, i) => {
-        const symbol = new SynergySymbol(avatar.x, avatar.y, type, i)
+        const symbol = new SynergySymbol(this.centerX, this.centerY, type, i)
         this.symbols?.set(symbol.id, symbol)
       })
-    })
+    } else {
+      this.avatars?.forEach((avatar) => {
+        const player = this.alivePlayers.find((p) => p.id === avatar.id)!
+        const synergiesTriggerLevels: [Synergy, number][] = Array.from(
+          player.synergies
+        ).map(([type, value]) => {
+          const lastTrigger = SynergyTriggers[type]
+            .filter((n) => n <= value)
+            .at(-1)
+          let levelReached = lastTrigger
+            ? SynergyTriggers[type].indexOf(lastTrigger) + 1
+            : 0
+          // removing low triggers synergies
+          if (type === Synergy.FLORA || type === Synergy.LIGHT)
+            levelReached = min(0)(levelReached - 1)
+          if (type === Synergy.GOURMET && levelReached > 1) levelReached = 1 // to compensate for the current lack of diversity in the legendary pool
+          return [type, levelReached]
+        })
+        const candidatesSymbols: Synergy[] = []
+        synergiesTriggerLevels.forEach(([type, level]) => {
+          // add as many symbols as synergy levels reached
+          candidatesSymbols.push(...new Array(level).fill(type))
+        })
+        //logger.debug("symbols from synergies", candidatesSymbols)
+        if (candidatesSymbols.length < 4) {
+          // if player has reached less than 4 synergy level triggers, we complete with random other incomplete synergies
+          const incompleteSynergies = synergiesTriggerLevels
+            .filter(
+              ([type, level]) => level === 0 && player.synergies.get(type)! > 0
+            )
+            .map(([type, _level]) => type)
+          candidatesSymbols.push(
+            ...pickNRandomIn(incompleteSynergies, 4 - candidatesSymbols.length)
+          )
+          /*logger.debug(
+            "completing symbols with incomplete synergies",
+            incompleteSynergies
+          )*/
+        }
+        while (candidatesSymbols.length < 4) {
+          // if still incomplete, complete with random
+          candidatesSymbols.push(pickRandomIn(Synergy))
+          /*logger.debug(
+            "completing symbols with random synergies",
+            candidatesSymbols
+          )*/
+        }
+
+        const symbols = pickNRandomIn(candidatesSymbols, NB_SYMBOLS_PER_PLAYER)
+        //logger.debug(`symbols chosen for player ${player.name}`, symbols)
+        symbols.forEach((type, i) => {
+          const symbol = new SynergySymbol(avatar.x, avatar.y, type, i)
+          this.symbols?.set(symbol.id, symbol)
+        })
+      })
+    }
 
     // randomly distribute symbols across portals
     const portalIds = shuffleArray(keys(this.portals!))
@@ -481,12 +605,12 @@ export class MiniGame {
         ...(this.symbolsByPortal.get(portalId) ?? []),
         symbol
       ])
-      setTimeout(
+      room.clock.setTimeout(
         () => {
           symbol.index = Math.floor(i / portalIds.length)
           symbol.portalId = portalId
         },
-        1500 + 1500 * (i / symbols.length)
+        1500 * (i / symbols.length)
       )
     })
 
@@ -558,6 +682,7 @@ export class MiniGame {
   stop(room: GameRoom) {
     const state: GameState = room.state
     const players: MapSchema<Player> = state.players
+    const encounter = state.townEncounter
     this.bodies.forEach((body, key) => {
       Composite.remove(this.engine.world, body)
       this.bodies.delete(key)
@@ -569,7 +694,11 @@ export class MiniGame {
         player &&
         !player.isBot &&
         this.items &&
-        state.specialGameRule !== SpecialGameRule.KECLEONS_SHOP
+        !(
+          encounter &&
+          encounter in TownEncounterSellPrice &&
+          state.specialGameRule !== SpecialGameRule.TOWN_FESTIVAL
+        )
       ) {
         // give a random item if none was taken
         const remainingItems = [...this.items.entries()].filter(
@@ -583,29 +712,47 @@ export class MiniGame {
       if (avatar.portalId == "" && player && !player.isBot) {
         // random propositions if no portal was taken
         avatar.portalId = "random"
+        if (state.stageLevel == 0 && this.portals) {
+          // for initial portal, force to pick one of the portals not taken
+          avatar.portalId = pickRandomIn(
+            values(this.portals).filter((p) => p.avatarId == "")
+          ).id
+        }
       }
 
       if (avatar.itemId) {
         const item = this.items?.get(avatar.itemId)
         if (item && player && !player.isBot) {
-          player.items.push(item.name)
+          if (item.name === Item.EGG_FOR_SELL) {
+            giveRandomEgg(player, false)
+          } else {
+            player.items.push(item.name)
+          }
         }
       }
 
       if (player && PortalCarouselStages.includes(state.stageLevel)) {
         if (avatar.portalId && this.portals?.has(avatar.portalId)) {
           const portal = this.portals.get(avatar.portalId)!
-          player.map = portal.map
-          player.updateRegionalPool(state, true)
+          if (portal.map !== player.map) {
+            player.map = portal.map
+            player.updateRegionalPool(state, true)
+            for (let i = 0; i < player.berryTreesType.length; i++) {
+              player.berryTreesType[i] = pickRandomIn(Berries)
+              player.berryTreesStage[i] = 0
+            }
+          }
         }
 
         const symbols = this.symbolsByPortal.get(avatar.portalId) ?? []
         const portalSynergies = symbols.map((s) => s.synergy)
-        state.shop.assignUniquePropositions(
-          player,
-          state.stageLevel,
-          portalSynergies
-        )
+        if (state.stageLevel > 1) {
+          state.shop.assignUniquePropositions(
+            player,
+            state.stageLevel,
+            portalSynergies
+          )
+        }
       }
 
       this.avatars!.delete(avatar.id)

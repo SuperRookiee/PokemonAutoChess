@@ -4,10 +4,12 @@ import Player from "../../../../models/colyseus-models/player"
 import { Item } from "../../../../types/enum/Item"
 import { values } from "../../../../utils/schemas"
 import ItemContainer from "./item-container"
+import { DEPTH } from "../depths"
 
 export default class ItemsContainer extends GameObjects.Container {
   pokemonId: string | null
   playerId: string
+  items: Item[] = []
 
   constructor(
     scene: Phaser.Scene,
@@ -21,7 +23,7 @@ export default class ItemsContainer extends GameObjects.Container {
 
     this.pokemonId = pokemonId
     this.playerId = playerId
-    this.setDepth(2)
+    this.setDepth(DEPTH.POKEMON_ITEM)
     scene.add.existing(this)
     this.render(inventory)
   }
@@ -33,7 +35,9 @@ export default class ItemsContainer extends GameObjects.Container {
     const ITEMS_PER_COLUMN = 6
     const items = values(inventory)
 
+    this.items = []
     items.forEach((item, i) => {
+      this.items.push(item)
       const x = -1 * itemSize * Math.floor(i / ITEMS_PER_COLUMN)
       const y = (i % ITEMS_PER_COLUMN) * itemSize
       this.add(

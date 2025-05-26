@@ -11,22 +11,25 @@ import { Pkm, PkmIndex } from "../../../../types/enum/Pokemon"
 import { Synergy } from "../../../../types/enum/Synergy"
 import { AbilityTooltip } from "../../pages/component/ability/ability-tooltip"
 import { addIconsToDescription } from "../../pages/utils/descriptions"
-import { getPortraitSrc } from "../../utils"
+import { getPortraitSrc } from "../../../../utils/avatar"
+import { DishByPkm } from "../../../../core/dishes"
+import { Item } from "../../../../types/enum/Item"
 
 export default class PokemonDetail extends GameObjects.DOMElement {
   dom: HTMLDivElement
-  hp: HTMLDivElement
-  atk: HTMLDivElement
-  def: HTMLDivElement
-  speDef: HTMLDivElement
-  range: HTMLDivElement
-  atkSpeed: HTMLDivElement
-  critChance: HTMLDivElement
-  critPower: HTMLDivElement
-  ap: HTMLDivElement
+  hp: HTMLSpanElement
+  atk: HTMLSpanElement
+  def: HTMLSpanElement
+  speDef: HTMLSpanElement
+  range: HTMLSpanElement
+  speed: HTMLSpanElement
+  luck: HTMLSpanElement
+  critChance: HTMLSpanElement
+  critPower: HTMLSpanElement
+  ap: HTMLSpanElement
   abilityDescription: HTMLDivElement | null = null
   passiveDescription: HTMLDivElement | null = null
-  pp: HTMLDivElement
+  pp: HTMLSpanElement
   abilityRoot: ReactDOM.Root | null = null
   passiveDescriptionRoot: ReactDOM.Root | null = null
 
@@ -41,12 +44,12 @@ export default class PokemonDetail extends GameObjects.DOMElement {
     def: number,
     speDef: number,
     range: number,
-    atkSpeed: number,
+    speed: number,
     critChance: number,
     critPower: number,
     ap: number,
     pp: number,
-    luck: number,
+    luck: number = 0,
     types: Set<Synergy>,
     skill: Ability,
     passive: Passive,
@@ -54,45 +57,51 @@ export default class PokemonDetail extends GameObjects.DOMElement {
     shiny: boolean,
     index: string,
     stars: number,
-    evolution: Pkm
+    stages: number,
+    evolution: Pkm,
+    items: Item[],
+    inBattle: boolean
   ) {
     super(scene, x, y)
 
     this.dom = document.createElement("div")
     this.dom.className = "my-container game-pokemon-detail-tooltip"
     const wrap = document.createElement("div")
-    wrap.className = "game-pokemon-detail"
+    wrap.className = `game-pokemon-detail ${inBattle ? "in-battle" : "in-board"}`
 
-    this.hp = document.createElement("p")
+    this.hp = document.createElement("span")
     this.hp.textContent = hp.toString()
 
-    this.atk = document.createElement("p")
+    this.pp = document.createElement("span")
+    this.pp.innerHTML = pp.toString()
+
+    this.atk = document.createElement("span")
     this.atk.textContent = atk.toString()
 
-    this.def = document.createElement("p")
+    this.def = document.createElement("span")
     this.def.textContent = def.toString()
 
-    this.speDef = document.createElement("p")
+    this.speDef = document.createElement("span")
     this.speDef.textContent = speDef.toString()
 
-    this.range = document.createElement("p")
+    this.range = document.createElement("span")
     this.range.textContent = range.toString()
 
-    this.atkSpeed = document.createElement("p")
-    this.atkSpeed.textContent = atkSpeed.toFixed(2)
+    this.speed = document.createElement("span")
+    this.speed.textContent = speed.toString()
 
-    this.critChance = document.createElement("p")
+    this.luck = document.createElement("span")
+    this.luck.textContent = luck.toString()
+
+    this.critChance = document.createElement("span")
     this.critChance.textContent = critChance.toString() + "%"
 
-    this.critPower = document.createElement("p")
+    this.critPower = document.createElement("span")
     this.critPower.textContent = critPower.toString()
 
-    this.ap = document.createElement("p")
+    this.ap = document.createElement("span")
     this.ap.textContent = ap.toString()
     this.ap.classList.toggle("negative", ap < 0)
-
-    this.pp = document.createElement("p")
-    this.pp.innerHTML = pp.toString()
 
     const avatar = document.createElement("img")
     avatar.className = "game-pokemon-detail-portrait"
@@ -152,23 +161,40 @@ export default class PokemonDetail extends GameObjects.DOMElement {
     })
     wrap.appendChild(typesList)
 
-    const stats = [
+    let stats = inBattle ? [
       { stat: Stat.HP, elm: this.hp },
       { stat: Stat.DEF, elm: this.def },
       { stat: Stat.ATK, elm: this.atk },
-      { stat: Stat.ATK_SPEED, elm: this.atkSpeed },
+      { stat: Stat.AP, elm: this.ap },
       { stat: Stat.CRIT_POWER, elm: this.critPower },
       { stat: Stat.PP, elm: this.pp },
       { stat: Stat.SPE_DEF, elm: this.speDef },
-      { stat: Stat.AP, elm: this.ap },
-      { stat: Stat.RANGE, elm: this.range },
+      { stat: Stat.SPEED, elm: this.speed },
+      { stat: Stat.LUCK, elm: this.luck },
       { stat: Stat.CRIT_CHANCE, elm: this.critChance }
+    ] : [
+      { stat: Stat.HP, elm: this.hp },
+      { stat: Stat.DEF, elm: this.def },
+      { stat: Stat.ATK, elm: this.atk },
+      { stat: Stat.RANGE, elm: this.range },
+      { stat: Stat.PP, elm: this.pp },
+      { stat: Stat.SPE_DEF, elm: this.speDef },
+      { stat: Stat.SPEED, elm: this.speed },
     ]
+
+    if (passive === Passive.INANIMATE) {
+      stats = [
+        { stat: Stat.HP, elm: this.hp },
+        { stat: Stat.DEF, elm: this.def },
+        { stat: Stat.SPE_DEF, elm: this.speDef }
+      ]
+    }
 
     const statsElm = document.createElement("div")
     statsElm.className = "game-pokemon-detail-stats"
     for (const { stat, elm } of stats) {
       const statElm = document.createElement("div")
+      statElm.className = "game-pokemon-detail-stat-" + stat.toLowerCase()
       const statImg = document.createElement("img")
       statImg.src = `assets/icons/${stat}.png`
       statImg.alt = stat
@@ -178,6 +204,35 @@ export default class PokemonDetail extends GameObjects.DOMElement {
       statsElm.appendChild(statElm)
     }
     wrap.appendChild(statsElm)
+
+    let dish = DishByPkm[name]
+    if (!dish && types.has(Synergy.GOURMET)) {
+      if (items.includes(Item.COOKING_POT)) {
+        dish = Item.HEARTY_STEW
+      } else if (name !== Pkm.GUZZLORD) {
+        dish = Item.SANDWICH
+      }
+    }
+
+    if (dish) {
+      const pokemonDish = document.createElement("div")
+      pokemonDish.className = "game-pokemon-detail-dish"
+      ReactDOM.createRoot(pokemonDish).render(<>
+        <div className="game-pokemon-detail-dish-name">
+          <img src="assets/ui/dish.svg" /><i>{t("signature_dish")}:</i> {t(`item.${dish}`)}
+        </div>
+        <img
+          src={`assets/item/${dish}.png`}
+          className="game-pokemon-detail-dish-icon"
+          alt={dish}
+          title={t(`item.${dish}`)}
+        />
+        <p>
+          {addIconsToDescription(t(`item_description.${dish}`))}
+        </p>
+      </>)
+      wrap.appendChild(pokemonDish)
+    }
 
     if (passive != Passive.NONE) {
       this.passiveDescription = document.createElement("div")
@@ -191,7 +246,7 @@ export default class PokemonDetail extends GameObjects.DOMElement {
       const abilityDiv = document.createElement("div")
       abilityDiv.className = "game-pokemon-detail-ult"
       this.abilityRoot = ReactDOM.createRoot(abilityDiv)
-      this.updateAbilityDescription({ skill, stars, ap, luck })
+      this.updateAbilityDescription({ skill, stars, stages, ap, luck })
       wrap.appendChild(abilityDiv)
     }
 
@@ -204,11 +259,11 @@ export default class PokemonDetail extends GameObjects.DOMElement {
     el.classList.toggle("negative", value < 0)
   }
 
-  updateAbilityDescription({ skill, stars, ap, luck }: { skill: Ability, stars: number, ap: number, luck: number }) {
+  updateAbilityDescription({ skill, stars, stages, ap, luck }: { skill: Ability, stars: number, stages: number, ap: number, luck: number }) {
     this.abilityRoot?.render(
       <>
         <div className="ability-name">{t(`ability.${skill}`)}</div>
-        <AbilityTooltip ability={skill} stats={{ stars, ap, luck }} />
+        <AbilityTooltip ability={skill} stats={{ stars, stages, ap, luck }} />
       </>
     )
   }

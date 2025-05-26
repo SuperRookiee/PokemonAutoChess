@@ -2,23 +2,21 @@ import { t } from "i18next"
 import React, { useState } from "react"
 import { Tab, TabList, TabPanel, Tabs } from "react-tabs"
 import { Tooltip } from "react-tooltip"
-import { PkmWithConfig } from "../../../../../types"
+import { PkmWithCustom } from "../../../../../types"
 import {
   ArtificialItems,
   ItemComponents,
   Berries,
   CraftableItems,
   Item,
-  WeatherRocks,
-  ShinyItems,
-  SpecialItems
+  ShinyItems
 } from "../../../../../types/enum/Item"
 import { ItemDetailTooltip } from "../../../game/components/item-detail"
 import { cc } from "../../utils/jsx"
 
 export default function ItemPicker(props: {
-  selected: PkmWithConfig | Item
-  selectEntity: React.Dispatch<React.SetStateAction<PkmWithConfig | Item>>
+  selected: PkmWithCustom | Item
+  selectEntity: React.Dispatch<React.SetStateAction<PkmWithCustom | Item>>
 }) {
   const [itemHovered, setItemHovered] = useState<Item>()
 
@@ -29,24 +27,13 @@ export default function ItemPicker(props: {
   const tabs = [
     { label: t("components"), key: "components", items: ItemComponents },
     { label: t("craftable_items"), key: "craftable", items: CraftableItems },
-    { label: t("berries"), key: "berries", items: Berries },
+    { label: t("food"), key: "food", items: [...Berries, Item.TART_APPLE, Item.SWEET_APPLE, Item.SIRUPY_APPLE, Item.CHEF_HAT] },
 
     { label: t("artificial_items"), key: "artificial", items: ArtificialItems },
-
-    {
-      label: t("weather_rocks"),
-      key: "weather_rocks",
-      items: WeatherRocks
-    },
     {
       label: t("shiny_items"),
       key: "shiny_items",
       items: ShinyItems
-    },
-    {
-      label: t("special_items"),
-      key: "special_items",
-      items: SpecialItems
     }
   ]
 
@@ -63,8 +50,10 @@ export default function ItemPicker(props: {
             <img
               key={item}
               src={"assets/item/" + Item[item] + ".png"}
-              className={cc("item", { selected: item === props.selected })}
-              data-tooltip-id="detail-item"
+              className={cc("item", {
+                selected: item === props.selected
+              })}
+              data-tooltip-id="item-detail"
               onMouseOver={() => setItemHovered(item)}
               onClick={() => props.selectEntity(item)}
               draggable
@@ -74,7 +63,7 @@ export default function ItemPicker(props: {
         </TabPanel>
       ))}
       {itemHovered && <Tooltip
-        id="detail-item"
+        id="item-detail"
         className="custom-theme-tooltip item-detail-tooltip"
       >
         <ItemDetailTooltip item={itemHovered} />

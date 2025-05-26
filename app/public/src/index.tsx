@@ -11,13 +11,22 @@ import Game from "./pages/game"
 import Lobby from "./pages/lobby"
 import Preparation from "./pages/preparation"
 import { SpriteDebug } from "./pages/sprite-viewer"
-import { loadPreferences } from "./preferences"
+import { Gameboy } from "./pages/gameboy"
 import store from "./stores/index"
 
 import "./i18n"
 import "./style/index.css"
 
-loadPreferences()
+// Redirect top window if running in an iframe
+if (window.top && window !== window.top) {
+  window.top.location.replace(window.location.href);
+}
+
+// Prevent the website to be opened from window.open()
+if (window.opener) {
+  window.opener.location.replace(window.location.href);
+}
+
 const container = document.getElementById("root")
 const root = createRoot(container!)
 
@@ -25,7 +34,10 @@ root.render(
   <Provider store={store}>
     <React.StrictMode>
       <Suspense fallback="loading">
-        <BrowserRouter>
+        <BrowserRouter future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true,
+        }}>
           <Routes>
             <Route path="/" element={<Auth />} />
             <Route path="/lobby" element={<Lobby />} />
@@ -36,6 +48,7 @@ root.render(
             <Route path="/bot-admin" element={<BotManagerPanel />} />
             <Route path="/sprite-viewer" element={<SpriteDebug />} />
             <Route path="/map-viewer" element={<MapViewer />} />
+            <Route path="/gameboy" element={<Gameboy />} />
           </Routes>
         </BrowserRouter>
       </Suspense>

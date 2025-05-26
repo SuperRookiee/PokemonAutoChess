@@ -1,9 +1,15 @@
 import React from "react"
-import "./patchnotes.css"
 import { Poster } from "./poster"
+import "./patchnotes.css"
 
 export default function PatchNotes() {
   const PATCHES = [
+    "6.2",
+    "6.1",
+    "6.0",
+    "5.10",
+    "5.9",
+    "5.8",
     "5.7",
     "5.6",
     "5.5",

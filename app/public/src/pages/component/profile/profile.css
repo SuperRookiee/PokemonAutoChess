@@ -19,6 +19,12 @@
   text-align: center;
 }
 
+.profile-modal .disclaimer {
+  font-size: 1rem;
+  margin: 0.5em 0;
+  font-style: italic;
+}
+
 .profile-modal .profile-box {
   grid-area: card;
 }
@@ -85,7 +91,7 @@
   margin: 0.25em;
 }
 
-.profile-modal .game-history-list {
+.profile-modal article {
   grid-area: history;
   margin-left: 1em;
   max-height: 100%;
@@ -105,7 +111,7 @@
 }
 
 .profile-modal .gadget > img {
-  grid-row: 1/4;
+  grid-row: 1 / 4;
   width: 80px;
   margin: auto;
 }
@@ -132,7 +138,7 @@
     padding: 0 0.5em;
   }
 
-  .profile-modal .game-history-list {
+  .profile-modal article {
     margin-left: 0;
   }
 

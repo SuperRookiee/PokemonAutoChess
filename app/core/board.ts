@@ -1,6 +1,6 @@
 import { IPokemonEntity, Transfer } from "../types"
-import { BoardEffect, Effect } from "../types/enum/Effect"
-import { Orientation } from "../types/enum/Game"
+import { BoardEffect, EffectEnum } from "../types/enum/Effect"
+import { Orientation, OrientationKnockback, Team } from "../types/enum/Game"
 import { Passive } from "../types/enum/Passive"
 import { distanceC, distanceM } from "../utils/distance"
 import { logger } from "../utils/logger"
@@ -18,13 +18,13 @@ export default class Board {
   rows: number
   columns: number
   cells: Array<PokemonEntity | undefined>
-  effects: Array<Effect | undefined>
+  effects: Array<EffectEnum | undefined>
 
   constructor(rows: number, colums: number) {
     this.rows = rows
     this.columns = colums
     this.cells = new Array<PokemonEntity | undefined>(this.rows * this.columns)
-    this.effects = new Array<Effect | undefined>(this.rows * this.columns)
+    this.effects = new Array<EffectEnum | undefined>(this.rows * this.columns)
   }
 
   getValue(x: number, y: number): PokemonEntity | undefined {
@@ -47,7 +47,7 @@ export default class Board {
 
         if (value.passive === Passive.STENCH) {
           this.effects[value.positionY * this.columns + value.positionX] =
-            Effect.POISON_GAS
+            EffectEnum.POISON_GAS
         }
 
         value.positionX = x
@@ -245,6 +245,7 @@ export default class Board {
   }
 
   getCellsInRadius(cellX: number, cellY: number, radius: number) {
+    // see https://i.imgur.com/jPzf35e.png
     const cells = new Array<Cell>()
     radius = Math.floor(Math.abs(radius)) + 0.5
     const radiusSquared = radius * radius
@@ -322,14 +323,24 @@ export default class Board {
     return cells
   }
 
-  getTeleportationCell(x: number, y: number) {
+  getTeleportationCell(x: number, y: number, boardSide?: Team) {
     const candidates = new Array<Cell>()
-    ;[
+    const blueCorners = [
       { x: 0, y: 0 },
-      { x: 0, y: this.rows - 1 },
-      { x: this.columns - 1, y: this.rows - 1 },
       { x: this.columns - 1, y: 0 }
-    ].forEach((coord) => {
+    ]
+    const redCorners = [
+      { x: 0, y: this.rows - 1 },
+      { x: this.columns - 1, y: this.rows - 1 }
+    ]
+
+    const corners =
+      boardSide === Team.BLUE_TEAM
+        ? blueCorners
+        : boardSide === Team.RED_TEAM
+          ? redCorners
+          : [...blueCorners, ...redCorners]
+    corners.forEach((coord) => {
       const cells = this.getCellsBetween(x, y, coord.x, coord.y)
       cells.forEach((cell) => {
         if (cell.value === undefined) {
@@ -363,10 +374,34 @@ export default class Board {
     return candidates[0].value === undefined ? candidates[0] : null
   }
 
-  getEffectOnCell(x: number, y: number): Effect | undefined {
+  getEffectOnCell(x: number, y: number): EffectEnum | undefined {
     if (y >= 0 && y < this.rows && x >= 0 && x < this.columns) {
       return this.effects[this.columns * y + x]
     }
+  }
+
+  getClosestAvailablePlace(
+    targetX: number,
+    targetY: number
+  ): { x: number; y: number; distance: number } | null {
+    const candidateCells = new Array<{
+      distance: number
+      x: number
+      y: number
+    }>()
+
+    this.forEach((x: number, y: number, value: PokemonEntity | undefined) => {
+      if (value === undefined) {
+        candidateCells.push({
+          x,
+          y,
+          distance: distanceM(x, y, targetX, targetY)
+        })
+      }
+    })
+
+    candidateCells.sort((a, b) => a.distance - b.distance)
+    return candidateCells[0] ?? null
   }
 
   getFarthestTargetCoordinateAvailablePlace(
@@ -375,35 +410,49 @@ export default class Board {
   ):
     | { x: number; y: number; distance: number; target: PokemonEntity }
     | undefined {
-    const candidateCells = new Array<{
-      distance: number
-      target: PokemonEntity
-      x: number
-      y: number
-    }>()
+    let maxTargetDistance = 0
+    let maxCellDistance = 0
+    let selectedCell:
+      | { x: number; y: number; distance: number; target: PokemonEntity }
+      | undefined
 
-    this.forEach((x: number, y: number, value: PokemonEntity | undefined) => {
-      if (value && value.isTargettableBy(pokemon, !targetAlly, targetAlly)) {
-        candidateCells.push(
-          ...this.getAdjacentCells(x, y)
-            .filter((cell) => this.getValue(cell.x, cell.y) === undefined)
-            .map((cell) => ({
-              x: cell.x,
-              y: cell.y,
-              distance: distanceM(
-                pokemon.positionX,
-                pokemon.positionY,
-                cell.x,
-                cell.y
-              ),
-              target: value
-            }))
+    this.forEach((x: number, y: number, entity: PokemonEntity | undefined) => {
+      if (entity && entity.isTargettableBy(pokemon, !targetAlly, targetAlly)) {
+        const targetDistance = distanceM(
+          pokemon.positionX,
+          pokemon.positionY,
+          entity.positionX,
+          entity.positionY
         )
+        if (targetDistance > maxTargetDistance) {
+          maxCellDistance = 0
+          const freeCells = this.getAdjacentCells(x, y).filter(
+            (cell) => this.getValue(cell.x, cell.y) === undefined
+          )
+          for (const cell of freeCells) {
+            const cellDistance = distanceM(
+              pokemon.positionX,
+              pokemon.positionY,
+              cell.x,
+              cell.y
+            )
+            if (cellDistance > maxCellDistance) {
+              maxCellDistance = cellDistance
+              selectedCell = {
+                x: cell.x,
+                y: cell.y,
+                distance: cellDistance,
+                target: entity
+              }
+            }
+          }
+          if (selectedCell?.target === entity) {
+            maxTargetDistance = targetDistance
+          }
+        }
       }
     })
-
-    candidateCells.sort((a, b) => b.distance - a.distance)
-    return candidateCells[0]
+    return selectedCell
   }
 
   addBoardEffect(
@@ -446,5 +495,26 @@ export default class Board {
       })
     }
     this.effects[y * this.columns + x] = undefined
+  }
+
+  getKnockBackPlace(
+    x: number,
+    y: number,
+    knockBackOrientation: Orientation
+  ): { x: number; y: number } | null {
+    const possibleOrientations = OrientationKnockback[knockBackOrientation]
+    for (const orientation of possibleOrientations) {
+      const dx = OrientationVector[orientation][0]
+      const dy = OrientationVector[orientation][1]
+      const newX = x + dx
+      const newY = y + dy
+      if (newX >= 0 && newX < this.columns && newY >= 0 && newY < this.rows) {
+        const cell = this.getValue(newX, newY)
+        if (cell === undefined) {
+          return { x: newX, y: newY }
+        }
+      }
+    }
+    return null
   }
 }

@@ -1,7 +1,5 @@
 import Player from "../models/colyseus-models/player"
 import { PokemonActionState } from "../types/enum/Game"
-import { Item } from "../types/enum/Item"
-import { Weather } from "../types/enum/Weather"
 import { distanceC } from "../utils/distance"
 import { chance } from "../utils/random"
 import { AbilityStrategies } from "./abilities/abilities"
@@ -9,22 +7,20 @@ import Board from "./board"
 import { PokemonEntity } from "./pokemon-entity"
 import PokemonState from "./pokemon-state"
 import { AttackCommand } from "./simulation-command"
-import { getAttackTimings } from "../public/src/game/animation-manager"
+import delays from "../types/delays.json"
+import { IPokemonEntity } from "../types"
+import { PROJECTILE_SPEED } from "../types/Config"
+import { max } from "../utils/number"
+import { EffectEnum } from "../types/enum/Effect"
 
 export default class AttackingState extends PokemonState {
   name = "attacking"
 
-  update(
-    pokemon: PokemonEntity,
-    dt: number,
-    board: Board,
-    weather: Weather,
-    player: Player
-  ) {
-    super.update(pokemon, dt, board, weather, player)
+  update(pokemon: PokemonEntity, dt: number, board: Board, player: Player) {
+    super.update(pokemon, dt, board, player)
 
     if (pokemon.cooldown <= 0) {
-      pokemon.cooldown = pokemon.getAttackDelay()
+      pokemon.cooldown = Math.round(1000 / (0.4 + pokemon.speed * 0.007))
 
       // first, try to hit the same target than previous attack
       let target = board.getValue(pokemon.targetX, pokemon.targetY)
@@ -33,7 +29,20 @@ export default class AttackingState extends PokemonState {
         y: pokemon.targetY
       }
 
-      if (pokemon.status.confusion) {
+      if (pokemon.effects.has(EffectEnum.MERCILESS)) {
+        const candidates = this.getTargetsAtRange(pokemon, board)
+        let minLife = Infinity
+        for (const candidate of candidates) {
+          if (candidate.life + candidate.shield < minLife) {
+            minLife = candidate.life + candidate.shield
+            target = candidate
+            targetCoordinate = {
+              x: candidate.positionX,
+              y: candidate.positionY
+            }
+          }
+        }
+      } else if (pokemon.status.confusion) {
         targetCoordinate = this.getTargetCoordinateWhenConfused(pokemon, board)
       } else if (
         !(
@@ -59,10 +68,7 @@ export default class AttackingState extends PokemonState {
 
       // no target at range, changing to moving state
       if (!target || !targetCoordinate || pokemon.status.charm) {
-        const targetAtSight = this.getNearestTargetAtSightCoordinates(
-          pokemon,
-          board
-        )
+        const targetAtSight = this.getNearestTargetAtSight(pokemon, board)
         if (targetAtSight) {
           pokemon.toMovingState()
         }
@@ -73,16 +79,14 @@ export default class AttackingState extends PokemonState {
       ) {
         // CAST ABILITY
         let crit = false
-        if (pokemon.items.has(Item.REAPER_CLOTH)) {
+        const ability = AbilityStrategies[pokemon.skill]
+        if (
+          pokemon.effects.has(EffectEnum.ABILITY_CRIT) ||
+          ability.canCritByDefault
+        ) {
           crit = chance(pokemon.critChance / 100, pokemon)
         }
-        AbilityStrategies[pokemon.skill].process(
-          pokemon,
-          this,
-          board,
-          target,
-          crit
-        )
+        ability.process(pokemon, board, target, crit)
       } else {
         // BASIC ATTACK
         pokemon.count.attackCount++
@@ -123,4 +127,24 @@ export default class AttackingState extends PokemonState {
     pokemon.targetX = -1
     pokemon.targetY = -1
   }
+}
+
+export function getAttackTimings(pokemon: IPokemonEntity): {
+  delayBeforeShoot: number
+  travelTime: number
+  attackDuration: number
+} {
+  const attackDuration = 1000 / pokemon.speed
+  const d = delays[pokemon.index]?.d || 18 // number of frames before hit
+  const t = delays[pokemon.index]?.t || 36 // total number of frames in the animation
+
+  const delayBeforeShoot = max(attackDuration / 2)((attackDuration * d) / t)
+  const distance = distanceC(
+    pokemon.targetX,
+    pokemon.targetY,
+    pokemon.positionX,
+    pokemon.positionY
+  )
+  const travelTime = (distance * 1000) / PROJECTILE_SPEED
+  return { delayBeforeShoot, travelTime, attackDuration }
 }

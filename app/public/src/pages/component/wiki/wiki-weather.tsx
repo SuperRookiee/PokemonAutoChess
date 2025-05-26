@@ -8,12 +8,11 @@ import {
   SynergyAssociatedToWeather,
   Weather
 } from "../../../../../types/enum/Weather"
-import { getPortraitSrc } from "../../../utils"
+import { getPortraitSrc } from "../../../../../utils/avatar"
 import { addIconsToDescription } from "../../utils/descriptions"
 import { cc } from "../../utils/jsx"
 import { GamePokemonDetail } from "../game/game-pokemon-detail"
 import SynergyIcon from "../icons/synergy-icon"
-
 
 export default function WikiWeather() {
   const { t } = useTranslation()
@@ -77,7 +76,7 @@ const pokemonsInfluencingWeather = new Map([
   [Weather.WINDY, [Pkm.LUGIA, Pkm.LANDORUS, Pkm.THUNDURUS, Pkm.TORNADUS, Pkm.ENAMORUS]],
   [Weather.MISTY, [Pkm.ENAMORUS, Pkm.XERNEAS]],
   [Weather.RAIN, [Pkm.PRIMAL_KYOGRE, Pkm.CASTFORM_RAIN,]],
-  [Weather.SNOW, [Pkm.ARTICUNO, Pkm.CASTFORM_HAIL]],
+  [Weather.SNOW, [Pkm.ARTICUNO, Pkm.CASTFORM_HAIL, Pkm.TORNADUS]],
   [Weather.STORM, [Pkm.ZAPDOS, Pkm.THUNDURUS]],
   [Weather.SANDSTORM, [Pkm.LANDORUS, Pkm.PRIMAL_GROUDON]],
   [Weather.NEUTRAL, [Pkm.MEGA_RAYQUAZA]],

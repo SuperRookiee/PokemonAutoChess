@@ -1,8 +1,9 @@
-import React, { useState } from "react"
+import React, { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { AdditionalPicksStages } from "../../../../../types/Config"
 import { ShinyItems } from "../../../../../types/enum/Item"
 import { Pkm, PkmDuo, PkmDuos } from "../../../../../types/enum/Pokemon"
+import { SpecialGameRule } from "../../../../../types/enum/SpecialGameRule"
 import { useAppDispatch, useAppSelector } from "../../../hooks"
 import { pokemonPropositionClick } from "../../../stores/NetworkStore"
 import { getGameScene } from "../../game"
@@ -10,6 +11,8 @@ import { playSound, SOUNDS } from "../../utils/audio"
 import { addIconsToDescription } from "../../utils/descriptions"
 import GamePokemonDuoPortrait from "./game-pokemon-duo-portrait"
 import GamePokemonPortrait from "./game-pokemon-portrait"
+import { IDetailledPokemon } from "../../../../../models/mongo-models/bot-v2"
+import { localStore, LocalStoreKeys } from "../../utils/store"
 import "./game-pokemon-propositions.css"
 
 export default function GamePokemonsPropositions() {
@@ -22,6 +25,7 @@ export default function GamePokemonsPropositions() {
     (state) => state.game.itemsProposition
   )
   const stageLevel = useAppSelector((state) => state.game.stageLevel)
+  const specialGameRule = useAppSelector((state) => state.game.specialGameRule)
 
   const board = getGameScene()?.board
   const isBenchFull =
@@ -29,6 +33,18 @@ export default function GamePokemonsPropositions() {
     board.getBenchSize() >=
     (pokemonsProposition.some((p) => p in PkmDuo) ? 7 : 8)
   const life = useAppSelector((state) => state.game.players.find((p) => p.id === state.network.uid)?.life ?? 0)
+  const [teamPlanner, setTeamPlanner] = useState<IDetailledPokemon[]>(localStore.get(LocalStoreKeys.TEAM_PLANNER))
+  useEffect(() => {
+    const updateTeamPlanner = (e: StorageEvent) => {
+      if (e.key === LocalStoreKeys.TEAM_PLANNER) {
+        setTeamPlanner(localStore.get(LocalStoreKeys.TEAM_PLANNER))
+      }
+    }
+    window.addEventListener("storage", updateTeamPlanner)
+    return () => {
+      window.removeEventListener("storage", updateTeamPlanner)
+    }
+  }, [])
 
   const [visible, setVisible] = useState(true)
   if (pokemonsProposition.length > 0 && life > 0) {
@@ -41,6 +57,7 @@ export default function GamePokemonsPropositions() {
           {AdditionalPicksStages.includes(stageLevel) && (
             <h2>{t("pick_additional_pokemon_hint")}</h2>
           )}
+          {stageLevel === 1 && specialGameRule === SpecialGameRule.FIRST_PARTNER && <h2>{t("pick_first_partner_hint")}</h2>}
           <div className="game-pokemons-proposition-list">
             {pokemonsProposition.map((proposition, index) => {
               const item = itemsProposition[index]
@@ -48,7 +65,8 @@ export default function GamePokemonsPropositions() {
                 <div
                   key={index}
                   className="my-box active clickable"
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation()
                     playSound(SOUNDS.BUTTON_CLICK)
                     dispatch(pokemonPropositionClick(proposition))
                   }}
@@ -59,6 +77,7 @@ export default function GamePokemonsPropositions() {
                       origin="proposition"
                       index={index}
                       duo={proposition as PkmDuo}
+                      inPlanner={teamPlanner?.some(p => p.name === proposition[0] || p.name === proposition[1]) ?? false}
                     />
                   ) : (
                     <GamePokemonPortrait
@@ -66,6 +85,7 @@ export default function GamePokemonsPropositions() {
                       origin="proposition"
                       index={index}
                       pokemon={proposition as Pkm}
+                      inPlanner={teamPlanner?.some(p => p.name === proposition) ?? false}
                     />
                   )}
                   {item && ShinyItems.includes(item) === false && (
@@ -82,7 +102,6 @@ export default function GamePokemonsPropositions() {
                         style={{
                           width: "2rem",
                           height: "2rem",
-                          imageRendering: "pixelated",
                           verticalAlign: "middle"
                         }}
                         src={"assets/item/" + item + ".png"}
@@ -109,7 +128,7 @@ export default function GamePokemonsPropositions() {
             {visible ? t("hide") : t("show")}
           </button>
         </div>
-      </div>
+      </div >
     )
   } else {
     return null

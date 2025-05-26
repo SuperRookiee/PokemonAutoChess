@@ -21,7 +21,7 @@ export enum GameMode {
 export enum GamePhaseState {
   PICK,
   FIGHT,
-  MINIGAME
+  TOWN
 }
 
 export enum PokemonActionState {
@@ -32,7 +32,8 @@ export enum PokemonActionState {
   HOP = "Hop",
   HURT = "Hurt",
   FISH = "Fish",
-  EMOTE = "Emote"
+  EMOTE = "Emote",
+  EAT = "Eat"
 }
 
 export enum Orientation {
@@ -55,6 +56,41 @@ export const OrientationFlip: { [key in Orientation]: Orientation } = {
   [Orientation.UPRIGHT]: Orientation.DOWNRIGHT,
   [Orientation.RIGHT]: Orientation.RIGHT,
   [Orientation.DOWNRIGHT]: Orientation.UPRIGHT
+}
+
+export const OrientationKnockback: { [key in Orientation]: Orientation[] } = {
+  [Orientation.DOWN]: [
+    Orientation.DOWN,
+    Orientation.DOWNRIGHT,
+    Orientation.DOWNLEFT
+  ],
+  [Orientation.DOWNLEFT]: [
+    Orientation.DOWNLEFT,
+    Orientation.DOWN,
+    Orientation.LEFT
+  ],
+  [Orientation.LEFT]: [
+    Orientation.LEFT,
+    Orientation.DOWNLEFT,
+    Orientation.UPLEFT
+  ],
+  [Orientation.UPLEFT]: [Orientation.UPLEFT, Orientation.LEFT, Orientation.UP],
+  [Orientation.UP]: [Orientation.UP, Orientation.UPLEFT, Orientation.UPRIGHT],
+  [Orientation.UPRIGHT]: [
+    Orientation.UPRIGHT,
+    Orientation.UP,
+    Orientation.RIGHT
+  ],
+  [Orientation.RIGHT]: [
+    Orientation.RIGHT,
+    Orientation.UPRIGHT,
+    Orientation.DOWNRIGHT
+  ],
+  [Orientation.DOWNRIGHT]: [
+    Orientation.DOWNRIGHT,
+    Orientation.RIGHT,
+    Orientation.DOWN
+  ]
 }
 
 export enum AttackType {
@@ -94,7 +130,7 @@ export enum SpriteType {
 
 export enum Stat {
   ATK = "ATK",
-  ATK_SPEED = "ATK_SPEED",
+  SPEED = "SPEED",
   DEF = "DEF",
   SPE_DEF = "SPE_DEF",
   HP = "HP",

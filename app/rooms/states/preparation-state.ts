@@ -4,6 +4,8 @@ import { GameUser } from "../../models/colyseus-models/game-user"
 import Message from "../../models/colyseus-models/message"
 import { EloRank } from "../../types/Config"
 import { GameMode } from "../../types/enum/Game"
+import { SpecialGameRule } from "../../types/enum/SpecialGameRule"
+import chatV2 from "../../models/mongo-models/chat-v2"
 
 export interface IPreparationState {
   users: MapSchema<GameUser>
@@ -30,9 +32,11 @@ export default class PreparationState
   @type("string") minRank: EloRank | null
   @type("string") maxRank: EloRank | null
   @type("string") gameMode: GameMode = GameMode.CUSTOM_LOBBY
+  @type("string") specialGameRule: SpecialGameRule | null
   @type("boolean") noElo: boolean
   @type(["string"]) whitelist: string[]
   @type(["string"]) blacklist: string[]
+  abortOnPlayerLeave?: AbortController
 
   constructor(params: {
     ownerId?: string
@@ -42,6 +46,7 @@ export default class PreparationState
     noElo?: boolean
     password?: string
     gameMode: GameMode
+    specialGameRule?: SpecialGameRule
     whitelist?: string[]
     blacklist?: string[]
   }) {
@@ -56,6 +61,7 @@ export default class PreparationState
     this.minRank = params.minRank ?? null
     this.maxRank = params.maxRank ?? null
     this.gameMode = params.gameMode
+    this.specialGameRule = params.specialGameRule ?? null
     this.whitelist = params.whitelist ?? []
     this.blacklist = params.blacklist ?? []
   }
@@ -76,6 +82,16 @@ export default class PreparationState
       params.avatar ?? "",
       time
     )
+    if (params.author) {
+      chatV2.create({
+        id: id,
+        payload: message.payload,
+        authorId: message.authorId,
+        author: message.author,
+        avatar: message.avatar,
+        time: time
+      })
+    }
     this.messages.push(message)
   }
 

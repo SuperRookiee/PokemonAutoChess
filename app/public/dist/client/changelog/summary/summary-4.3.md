@@ -30,7 +30,7 @@ New Synergy: ![Light](/assets/types/LIGHT.svg) Light gives various bonuses to on
 ![Skuntank](https://raw.githubusercontent.com/PMDCollab/SpriteCollab/master/portrait/0435/Normal.png)
 ![Illumise](https://raw.githubusercontent.com/PMDCollab/SpriteCollab/master/portrait/0314/Normal.png)
 ![Volbeat](https://raw.githubusercontent.com/PMDCollab/SpriteCollab/master/portrait/0313/Normal.png)
-![Cherrubi](https://raw.githubusercontent.com/PMDCollab/SpriteCollab/master/portrait/0420/Normal.png)
+![Cherubi](https://raw.githubusercontent.com/PMDCollab/SpriteCollab/master/portrait/0420/Normal.png)
 ![Cherrim](https://raw.githubusercontent.com/PMDCollab/SpriteCollab/master/portrait/0421/Normal.png)
 ![Cherrim Sunlight](https://raw.githubusercontent.com/PMDCollab/SpriteCollab/master/portrait/0421/0001/Happy.png)
 ![Misdreavus](https://raw.githubusercontent.com/PMDCollab/SpriteCollab/master/portrait/0200/Normal.png)
@@ -43,5 +43,7 @@ New Synergy: ![Light](/assets/types/LIGHT.svg) Light gives various bonuses to on
 ## New PVE rounds and more items
 
 PVE rounds and rewards have been reworked with these goals in mind: difficult and emblematic fights, more frequent in endgame and with better, various rewards; the average total number of components per game has increased, and there's no more random components after stage 20.
+
+---
 
 Check out the full changelog on [Discord](https://discord.com/channels/737230355039387749/737230355039387752/1165305761493176362)
